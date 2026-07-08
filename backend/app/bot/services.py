@@ -3,7 +3,7 @@ from typing import Optional
 from app.config import settings
 from app.database import SessionLocal
 from app.models import ApplicationLog, Campaign
-from app.services.auth_service import LoginState, login_manager
+from app.services.auth_service import LoginState, get_login_manager
 from app.services.scraper import check_session_valid
 from app.services.stats_service import DETAIL_LABELS, build_campaign_stats
 from app.services.worker import campaign_worker
@@ -21,26 +21,28 @@ def get_auth_status() -> dict:
 
 
 def start_login() -> str:
-    login_manager.start()
+    get_login_manager().start()
     return "Отправьте номер телефона следующим сообщением (формат: +79...)."
 
 
 def cancel_login() -> None:
-    login_manager.cancel()
+    get_login_manager().cancel()
 
 
 def get_login_state() -> dict:
-    return {"state": login_manager.state.value, "error": login_manager.error}
+    manager = get_login_manager()
+    return {"state": manager.state.value, "error": manager.error}
 
 
 def submit_login_phone(phone: str) -> str:
-    login_manager.submit_phone(phone)
+    get_login_manager().submit_phone(phone)
     return "Код отправлен. Отправьте SMS-код следующим сообщением."
 
 
 def submit_login_code(code: str) -> str:
-    login_manager.submit_code(code)
-    if login_manager.state == LoginState.COMPLETED:
+    manager = get_login_manager()
+    manager.submit_code(code)
+    if manager.state == LoginState.COMPLETED:
         return (
             "✅ Вход выполнен. Сессия сохранена.\n"
             "Проверьте: /status"
@@ -49,7 +51,7 @@ def submit_login_code(code: str) -> str:
 
 
 def logout() -> str:
-    login_manager.cancel()
+    get_login_manager().cancel()
     if settings.session_file.exists():
         settings.session_file.unlink()
     return "Сессия удалена."

@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-import asyncio
 import logging
 
 from fastapi import FastAPI, HTTPException, Request
@@ -10,27 +9,6 @@ from app.db_migrations import migrate_schema
 
 logger = logging.getLogger(__name__)
 
-BOT_STARTUP_TIMEOUT_SEC = 90
-
-
-async def _start_bot_background(app: FastAPI) -> None:
-    from app.bot.runtime import start_telegram_webhook
-
-    try:
-        app.state.bot_application = await asyncio.wait_for(
-            start_telegram_webhook(),
-            timeout=BOT_STARTUP_TIMEOUT_SEC,
-        )
-        app.state.bot_startup_error = None
-    except asyncio.TimeoutError:
-        app.state.bot_startup_error = (
-            f"Telegram webhook init timed out after {BOT_STARTUP_TIMEOUT_SEC}s"
-        )
-        logger.error(app.state.bot_startup_error)
-    except Exception as exc:
-        app.state.bot_startup_error = str(exc)
-        logger.exception("Telegram webhook failed to start")
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,26 +16,17 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     migrate_schema()
 
-    app.state.bot_application = None
-    app.state.bot_startup_error = None
-    app.state.bot_startup_task = None
-
     if settings.should_use_telegram_webhook:
-        app.state.bot_startup_task = asyncio.create_task(_start_bot_background(app))
+        from app.bot.runtime import schedule_bot_boot
+
+        schedule_bot_boot()
 
     yield
 
-    if app.state.bot_startup_task is not None:
-        app.state.bot_startup_task.cancel()
-        try:
-            await app.state.bot_startup_task
-        except asyncio.CancelledError:
-            pass
+    if settings.should_use_telegram_webhook:
+        from app.bot.runtime import shutdown_bot_runtime
 
-    if app.state.bot_application is not None:
-        from app.bot.runtime import stop_telegram_webhook
-
-        await stop_telegram_webhook(app.state.bot_application)
+        await shutdown_bot_runtime()
 
 
 app = FastAPI(
@@ -84,21 +53,24 @@ def health_live():
 
 
 @app.get("/api/health")
-def health(request: Request):
-    import time
+def health():
+    from app.bot.runtime import get_bot_status
 
     bot_status = "not_configured"
     bot_mode = "none"
+    bot_username = None
+    bot_error = None
+
     if settings.telegram_bot_token.strip():
         if settings.should_use_telegram_webhook:
             bot_mode = "webhook"
-            if getattr(request.app.state, "bot_application", None):
-                bot_status = "running"
-            elif getattr(request.app.state, "bot_startup_error", None):
-                bot_status = f"failed: {request.app.state.bot_startup_error[:120]}"
-            else:
-                bot_status = "starting"
+            info = get_bot_status()
+            bot_status = info["status"]
+            bot_username = info["username"]
+            bot_error = info["error"]
         else:
+            import time
+
             bot_mode = "polling"
             hb = settings.bot_heartbeat_file
             if hb.exists():
@@ -106,29 +78,35 @@ def health(request: Request):
                 bot_status = "running" if age_sec < 180 else f"stale ({int(age_sec)}s ago)"
             else:
                 bot_status = "no_heartbeat"
+
     allowed = settings.telegram_allowed_user_ids.strip()
-    bot_username = None
-    bot_app = getattr(request.app.state, "bot_application", None)
-    if bot_app is not None:
-        bot_username = bot_app.bot_data.get("username")
-    return {
+    payload = {
         "status": "ok",
         "mode": "telegram-bot",
         "bot": bot_status,
         "bot_mode": bot_mode,
-        "bot_username": f"@{bot_username}" if bot_username else None,
+        "bot_username": bot_username,
         "webhook_url": settings.telegram_webhook_url or None,
         "telegram_allowed_user_ids_set": bool(allowed),
     }
+    if bot_error:
+        payload["bot_startup_error"] = bot_error[:200]
+    return payload
 
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
-    bot_app = getattr(request.app.state, "bot_application", None)
-    if bot_app is None:
-        raise HTTPException(status_code=503, detail="Telegram webhook not configured")
-    from app.bot.runtime import enqueue_webhook_update
+    import asyncio
+
+    from app.bot.runtime import ensure_telegram_bot, process_webhook_update
+
+    try:
+        bot_app = await asyncio.wait_for(ensure_telegram_bot(), timeout=120)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=503, detail="Telegram bot startup timed out") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     payload = await request.json()
-    await enqueue_webhook_update(bot_app, payload)
+    await process_webhook_update(bot_app, payload)
     return {"ok": True}

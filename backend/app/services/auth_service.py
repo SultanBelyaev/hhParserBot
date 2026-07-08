@@ -4,7 +4,7 @@ import threading
 from enum import Enum
 from typing import Any, Optional
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Page, sync_playwright
 
 from app.config import settings
 from app.services.runtime_env import is_railway_runtime, require_headless_browser
@@ -229,4 +229,13 @@ class LoginManager:
                 cmd.done.put(exc)
 
 
-login_manager = LoginManager()
+_manager: LoginManager | None = None
+_manager_lock = threading.Lock()
+
+
+def get_login_manager() -> LoginManager:
+    global _manager
+    with _manager_lock:
+        if _manager is None:
+            _manager = LoginManager()
+        return _manager
