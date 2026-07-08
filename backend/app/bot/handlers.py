@@ -73,16 +73,24 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         f"Привет, {user.first_name}!\n\n"
         "HH AutoApply — управление автооткликами через Telegram.\n\n"
-        f"Ваш Telegram ID: `{user.id}`\n"
+        f"Ваш Telegram ID: {user.id}\n"
         "Используйте меню ниже или команды:\n"
         "/status — статус HH\n"
         "/campaigns — список кампаний\n"
         "/new — новая кампания\n"
         "/login — вход в HH\n"
         "/logout — выход из HH",
-        parse_mode="Markdown",
         reply_markup=main_menu_keyboard(),
     )
+
+
+async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.exception("Telegram handler error: %s", context.error)
+    if isinstance(update, Update):
+        if update.message:
+            await update.message.reply_text(f"Ошибка: {context.error}")
+        elif update.callback_query:
+            await update.callback_query.answer("Ошибка", show_alert=True)
 
 
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -342,7 +350,6 @@ def build_application(for_polling: bool = False) -> Application:
         },
         fallbacks=[CommandHandler("cancel", new_cancel)],
         allow_reentry=True,
-        per_message=True,
     )
 
     request = HTTPXRequest(
@@ -376,6 +383,7 @@ def build_application(for_polling: bool = False) -> Application:
     if for_polling:
         builder = builder.post_init(_on_bot_start)
     app = builder.build()
+    app.add_error_handler(_on_error)
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("campaigns", campaigns_cmd))

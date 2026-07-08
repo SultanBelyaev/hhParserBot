@@ -106,5 +106,9 @@ async def telegram_webhook(request: Request):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     payload = await request.json()
-    await process_webhook_update(bot_app, payload)
+    try:
+        await process_webhook_update(bot_app, payload)
+    except Exception:
+        logger.exception("Failed to process Telegram webhook update")
+        raise
     return {"ok": True}

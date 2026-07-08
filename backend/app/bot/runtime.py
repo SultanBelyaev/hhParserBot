@@ -145,5 +145,9 @@ async def shutdown_bot_runtime() -> None:
 async def process_webhook_update(app: Application, payload: dict) -> None:
     update = Update.de_json(payload, app.bot)
     if update is not None:
-        await app.process_update(update)
+        await app.update_queue.put(update)
         touch_heartbeat()
+        logger.debug(
+            "Webhook update queued: update_id=%s",
+            update.update_id,
+        )
