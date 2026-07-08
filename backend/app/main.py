@@ -70,4 +70,20 @@ def admin_page():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "mode": "playwright-parser"}
+    import time
+
+    bot_status = "not_configured"
+    if settings.telegram_bot_token.strip():
+        hb = settings.bot_heartbeat_file
+        if hb.exists():
+            age_sec = time.time() - hb.stat().st_mtime
+            bot_status = "running" if age_sec < 180 else f"stale ({int(age_sec)}s ago)"
+        else:
+            bot_status = "no_heartbeat"
+    allowed = settings.telegram_allowed_user_ids.strip()
+    return {
+        "status": "ok",
+        "mode": "playwright-parser",
+        "bot": bot_status,
+        "telegram_allowed_user_ids_set": bool(allowed),
+    }

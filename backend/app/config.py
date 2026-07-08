@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     telegram_proxy_url: str = Field(default="", validation_alias="TELEGRAM_PROXY_URL")
     telegram_connect_timeout: float = Field(default=30.0, validation_alias="TELEGRAM_CONNECT_TIMEOUT")
     telegram_read_timeout: float = Field(default=30.0, validation_alias="TELEGRAM_READ_TIMEOUT")
+
+    @field_validator("telegram_bot_token", "telegram_allowed_user_ids", "telegram_proxy_url", mode="before")
+    @classmethod
+    def _strip_env_quotes(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().strip('"').strip("'")
+        return value
+
+    @property
+    def bot_heartbeat_file(self) -> Path:
+        return Path(os.getenv("DATA_DIR", str(ROOT_DIR / "data"))) / "bot.heartbeat"
 
 
 settings = Settings()
