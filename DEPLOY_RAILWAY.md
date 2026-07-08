@@ -151,18 +151,11 @@ TELEGRAM_PROXY_URL=
 
 Дальше каждый push в GitHub автоматически пересобирает сервис. Подробнее: [`AUTO_DEPLOY.md`](AUTO_DEPLOY.md).
 
-### Проверка
+### После успешного деплоя
 
-```bash
-curl https://ВАШ-ДОМЕН.railway.app/api/health
-```
-
-Ожидается:
-```json
-{"status":"ok","mode":"playwright-parser"}
-```
-
-Откройте в браузере: `https://ВАШ-ДОМЕН.railway.app`
+1. **Settings → Networking → Generate Domain** — обязательно для Telegram webhook
+2. Проверка: `https://ваш-домен.railway.app/api/health` → `"bot_mode": "webhook"`
+3. Напишите боту `/start`
 
 ---
 

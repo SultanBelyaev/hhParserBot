@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     telegram_proxy_url: str = Field(default="", validation_alias="TELEGRAM_PROXY_URL")
     telegram_connect_timeout: float = Field(default=30.0, validation_alias="TELEGRAM_CONNECT_TIMEOUT")
     telegram_read_timeout: float = Field(default=30.0, validation_alias="TELEGRAM_READ_TIMEOUT")
+    railway_public_domain: str = Field(default="", validation_alias="RAILWAY_PUBLIC_DOMAIN")
+    public_url: str = Field(default="", validation_alias="PUBLIC_URL")
+    telegram_use_webhook: bool = Field(default=False, validation_alias="TELEGRAM_USE_WEBHOOK")
 
     @field_validator("telegram_bot_token", "telegram_allowed_user_ids", "telegram_proxy_url", mode="before")
     @classmethod
@@ -58,6 +61,27 @@ class Settings(BaseSettings):
     @property
     def bot_heartbeat_file(self) -> Path:
         return Path(os.getenv("DATA_DIR", str(ROOT_DIR / "data"))) / "bot.heartbeat"
+
+    @property
+    def telegram_webhook_base_url(self) -> str:
+        if self.public_url.strip():
+            return self.public_url.strip().rstrip("/")
+        if self.railway_public_domain.strip():
+            return f"https://{self.railway_public_domain.strip()}"
+        return ""
+
+    @property
+    def should_use_telegram_webhook(self) -> bool:
+        if not self.telegram_bot_token.strip():
+            return False
+        if self.telegram_use_webhook:
+            return bool(self.telegram_webhook_base_url)
+        return bool(self.railway_public_domain.strip())
+
+    @property
+    def telegram_webhook_url(self) -> str:
+        base = self.telegram_webhook_base_url
+        return f"{base}/telegram/webhook" if base else ""
 
 
 settings = Settings()

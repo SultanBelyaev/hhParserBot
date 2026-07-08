@@ -42,10 +42,13 @@ uvicorn app.main:app --host 0.0.0.0 --port "${PORT}" &
 API_PID=$!
 
 BOT_PID=""
-if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-  echo "[bot] starting..."
+# На Railway бот работает через webhook внутри uvicorn (без polling → без Conflict)
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -z "${RAILWAY_PUBLIC_DOMAIN:-}" ] && [ "${TELEGRAM_USE_WEBHOOK:-}" != "true" ]; then
+  echo "[bot] starting polling (local dev)..."
   python run_bot.py 2>&1 | while IFS= read -r line; do echo "[bot] $line"; done &
   BOT_PID=$!
+elif [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+  echo "Telegram bot: webhook mode (inside uvicorn, domain=${RAILWAY_PUBLIC_DOMAIN:-PUBLIC_URL})"
 else
   echo "TELEGRAM_BOT_TOKEN not set — bot skipped"
 fi
