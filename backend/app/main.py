@@ -4,8 +4,7 @@ import logging
 from fastapi import FastAPI, HTTPException, Request
 
 from app.config import settings
-from app.database import Base, engine
-from app.db_migrations import migrate_schema
+from app.db_init import init_database
 
 logger = logging.getLogger(__name__)
 
@@ -13,8 +12,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.session_file.parent.mkdir(parents=True, exist_ok=True)
-    Base.metadata.create_all(bind=engine)
-    migrate_schema()
+    init_database()
 
     if settings.should_use_telegram_webhook:
         from app.bot.runtime import schedule_bot_boot
