@@ -57,7 +57,7 @@ async def start_telegram_webhook(*, for_polling: bool = False) -> Application:
         )
 
     logger.info("Building Telegram application...")
-    app = await asyncio.to_thread(build_application, for_polling)
+    app = await asyncio.to_thread(lambda: build_application(for_polling=for_polling))
 
     logger.info("Initializing Telegram application...")
     await asyncio.wait_for(app.initialize(), timeout=STEP_TIMEOUT_SEC)

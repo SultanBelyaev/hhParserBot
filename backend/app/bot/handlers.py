@@ -308,7 +308,7 @@ async def menu_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await logout_cmd(update, context)
 
 
-def build_application(*, for_polling: bool = False) -> Application:
+def build_application(for_polling: bool = False) -> Application:
     if not settings.telegram_bot_token.strip():
         env_path = ROOT_DIR / ".env"
         raise RuntimeError(
