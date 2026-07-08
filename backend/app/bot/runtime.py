@@ -18,7 +18,7 @@ def touch_heartbeat() -> None:
     settings.bot_heartbeat_file.write_text(str(time.time()), encoding="utf-8")
 
 
-async def start_telegram_webhook() -> Application:
+async def start_telegram_webhook(*, for_polling: bool = False) -> Application:
     url = settings.telegram_webhook_url
     if not url:
         raise RuntimeError(
@@ -26,7 +26,7 @@ async def start_telegram_webhook() -> Application:
             "или укажите PUBLIC_URL=https://ваш-домен.railway.app"
         )
 
-    app = build_application()
+    app = build_application(for_polling=for_polling)
     await app.initialize()
     await app.start()
     await app.bot.set_webhook(url=url, drop_pending_updates=True)

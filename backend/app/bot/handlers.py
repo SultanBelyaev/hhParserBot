@@ -308,7 +308,7 @@ async def menu_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await logout_cmd(update, context)
 
 
-def build_application() -> Application:
+def build_application(*, for_polling: bool = False) -> Application:
     if not settings.telegram_bot_token.strip():
         env_path = ROOT_DIR / ".env"
         raise RuntimeError(
@@ -355,6 +355,9 @@ def build_application() -> Application:
     async def _on_bot_start(application: Application) -> None:
         import time
 
+        if not for_polling:
+            return
+
         info = await application.bot.get_webhook_info()
         if info.url:
             logger.warning("Removing active webhook: %s", info.url)
@@ -364,14 +367,15 @@ def build_application() -> Application:
         settings.bot_heartbeat_file.write_text(str(time.time()), encoding="utf-8")
         logger.info("Bot ready for polling, heartbeat written")
 
-    app = (
+    builder = (
         Application.builder()
         .token(settings.telegram_bot_token)
         .request(request)
         .get_updates_request(request)
-        .post_init(_on_bot_start)
-        .build()
     )
+    if for_polling:
+        builder = builder.post_init(_on_bot_start)
+    app = builder.build()
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("campaigns", campaigns_cmd))
@@ -408,7 +412,7 @@ def run_bot() -> None:
     while True:
         logger.info("Telegram bot starting%s", proxy_hint)
         try:
-            app = build_application()
+            app = build_application(for_polling=True)
             app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
             return
         except Conflict:

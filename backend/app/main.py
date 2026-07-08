@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 
 from fastapi import FastAPI, HTTPException, Request
@@ -9,6 +10,27 @@ from app.db_migrations import migrate_schema
 
 logger = logging.getLogger(__name__)
 
+BOT_STARTUP_TIMEOUT_SEC = 90
+
+
+async def _start_bot_background(app: FastAPI) -> None:
+    from app.bot.runtime import start_telegram_webhook
+
+    try:
+        app.state.bot_application = await asyncio.wait_for(
+            start_telegram_webhook(),
+            timeout=BOT_STARTUP_TIMEOUT_SEC,
+        )
+        app.state.bot_startup_error = None
+    except asyncio.TimeoutError:
+        app.state.bot_startup_error = (
+            f"Telegram webhook init timed out after {BOT_STARTUP_TIMEOUT_SEC}s"
+        )
+        logger.error(app.state.bot_startup_error)
+    except Exception as exc:
+        app.state.bot_startup_error = str(exc)
+        logger.exception("Telegram webhook failed to start")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,16 +40,19 @@ async def lifespan(app: FastAPI):
 
     app.state.bot_application = None
     app.state.bot_startup_error = None
-    if settings.should_use_telegram_webhook:
-        from app.bot.runtime import start_telegram_webhook, stop_telegram_webhook
+    app.state.bot_startup_task = None
 
-        try:
-            app.state.bot_application = await start_telegram_webhook()
-        except Exception as exc:
-            app.state.bot_startup_error = str(exc)
-            logger.exception("Telegram webhook failed to start")
+    if settings.should_use_telegram_webhook:
+        app.state.bot_startup_task = asyncio.create_task(_start_bot_background(app))
 
     yield
+
+    if app.state.bot_startup_task is not None:
+        app.state.bot_startup_task.cancel()
+        try:
+            await app.state.bot_startup_task
+        except asyncio.CancelledError:
+            pass
 
     if app.state.bot_application is not None:
         from app.bot.runtime import stop_telegram_webhook
@@ -50,6 +75,12 @@ def root():
         "ui": "telegram",
         "health": "/api/health",
     }
+
+
+@app.get("/api/health/live")
+def health_live():
+    """Fast liveness probe for Railway — must not block on bot init."""
+    return {"status": "ok"}
 
 
 @app.get("/api/health")
