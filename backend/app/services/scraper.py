@@ -113,6 +113,88 @@ def dismiss_overlays(page: Page) -> None:
                 pass
 
 
+def login_browser_context_kwargs() -> dict:
+    return {
+        "viewport": {"width": 1280, "height": 900},
+        "locale": "ru-RU",
+        "timezone_id": "Europe/Moscow",
+        "user_agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+    }
+
+
+def normalize_phone(phone: str) -> str:
+    cleaned = phone.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if cleaned.startswith("8") and len(cleaned) == 11:
+        return f"+7{cleaned[1:]}"
+    if cleaned.startswith("7") and len(cleaned) == 11 and not cleaned.startswith("+"):
+        return f"+{cleaned}"
+    if cleaned.isdigit() and len(cleaned) == 10:
+        return f"+7{cleaned}"
+    if not cleaned.startswith("+") and cleaned.isdigit():
+        return f"+{cleaned}"
+    return cleaned
+
+
+def find_login_phone_input(page: Page):
+    for selector in (
+        'input[type="tel"]:not([disabled])',
+        'input[inputmode="tel"]:not([disabled])',
+        'input[autocomplete="tel"]:not([disabled])',
+    ):
+        locator = page.locator(selector).last
+        if locator.count():
+            return locator
+    textboxes = page.get_by_role("textbox")
+    if textboxes.count() >= 2:
+        return textboxes.nth(1)
+    if textboxes.count():
+        return textboxes.first
+    raise RuntimeError("Поле телефона не найдено на странице входа HH")
+
+
+def find_login_otp_input(page: Page):
+    for selector in (
+        'input:not([disabled])[inputmode="numeric"]',
+        'input:not([disabled])[autocomplete="one-time-code"]',
+        'input:not([disabled])[type="tel"]',
+    ):
+        locator = page.locator(selector).first
+        if locator.count():
+            return locator
+    textboxes = page.get_by_role("textbox")
+    if textboxes.count():
+        return textboxes.last
+    raise RuntimeError("Поле кода из SMS не найдено")
+
+
+def wait_for_login_code_step(page: Page, *, timeout: float = 30_000) -> None:
+    code_heading = page.get_by_role("heading", name="Введите код из смс")
+    if code_heading.count():
+        code_heading.first.wait_for(timeout=timeout)
+        return
+    page.get_by_text("код из смс", exact=False).first.wait_for(timeout=timeout)
+
+
+def click_login_next(page: Page) -> None:
+    for name in ("Дальше", "Продолжить", "Получить код", "Отправить код"):
+        btn = page.get_by_role("button", name=name)
+        if btn.count():
+            btn.first.click()
+            return
+    raise RuntimeError('Кнопка "Дальше" не найдена на странице входа HH')
+
+
+def save_login_debug_screenshot(page: Page, session_file: Path, tag: str) -> None:
+    try:
+        path = session_file.parent / f"login_error_{tag}.png"
+        page.screenshot(path=str(path), full_page=True)
+    except Exception:
+        pass
+
+
 def is_logged_in(page: Page) -> bool:
     if "account/login" in page.url:
         return False

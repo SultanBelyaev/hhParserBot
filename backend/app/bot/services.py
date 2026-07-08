@@ -25,6 +25,10 @@ def start_login() -> str:
     return "Отправьте номер телефона следующим сообщением (формат: +79...)."
 
 
+def cancel_login() -> None:
+    login_manager.cancel()
+
+
 def get_login_state() -> dict:
     return {"state": login_manager.state.value, "error": login_manager.error}
 
@@ -37,7 +41,10 @@ def submit_login_phone(phone: str) -> str:
 def submit_login_code(code: str) -> str:
     login_manager.submit_code(code)
     if login_manager.state == LoginState.COMPLETED:
-        return "Вход выполнен. Сессия сохранена."
+        return (
+            "✅ Вход выполнен. Сессия сохранена.\n"
+            "Проверьте: /status"
+        )
     return "Обработка входа..."
 
 

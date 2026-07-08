@@ -50,26 +50,27 @@ def interactive_login(session_file: Path) -> None:
                 login_btn.first.click()
 
             phone = input("Введите номер телефона: ").strip()
-            phone_input = page.locator('input[type="tel"]:not([disabled])').last
-            if phone_input.count() == 0:
-                phone_input = page.get_by_role("textbox").nth(1)
+            from app.services.scraper import (
+                click_login_next,
+                find_login_otp_input,
+                find_login_phone_input,
+                normalize_phone,
+                wait_for_login_code_step,
+            )
+
+            phone_input = find_login_phone_input(page)
             phone_input.wait_for(state="visible", timeout=15_000)
             phone_input.click()
-            phone_input.fill(phone)
+            phone_input.fill(normalize_phone(phone))
 
-            next_btn = page.get_by_role("button", name="Дальше")
-            if next_btn.count() == 0:
-                next_btn = page.get_by_role("button", name="Продолжить")
-            next_btn.click()
+            click_login_next(page)
 
-            page.get_by_role("heading", name="Введите код из смс").wait_for(timeout=30_000)
+            wait_for_login_code_step(page, timeout=30_000)
             code = input("Введите код из SMS: ").strip()
 
-            otp_input = page.locator('input:not([disabled])[inputmode="numeric"]')
-            if otp_input.count() == 0:
-                otp_input = page.locator("input:not([disabled])").last
+            otp_input = find_login_otp_input(page)
             otp_input.click()
-            otp_input.fill(code)
+            otp_input.fill(code.strip().replace(" ", ""))
 
             page.wait_for_function(
                 "() => !window.location.pathname.includes('/account/login')",

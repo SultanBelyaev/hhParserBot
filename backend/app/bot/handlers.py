@@ -108,15 +108,32 @@ async def campaigns_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
 
 
+def _login_error_hint(exc: Exception) -> str:
+    text = str(exc)
+    hint = (
+        "\n\nОтправьте /login чтобы попробовать снова.\n"
+        "Если ошибка повторяется на Railway — войдите локально:\n"
+        "python login.py → python scripts/encode_session.py"
+    )
+    if "Timeout" in text or "timeout" in text:
+        hint = (
+            "\n\nHH мог не ответить (таймаут). Попробуйте /login ещё раз.\n"
+            "Надёжнее: локально `python login.py`, затем обновите SESSION_JSON_BASE64."
+        )
+    return f"Ошибка: {text}{hint}"
+
+
 async def login_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if await _deny(update):
         return ConversationHandler.END
+    await update.message.reply_text("⏳ Запускаю браузер для входа на HH...")
     try:
         msg = await asyncio.to_thread(bot_services.start_login)
         await update.message.reply_text(msg)
         return LOGIN_PHONE
     except Exception as exc:
-        await update.message.reply_text(f"Ошибка: {exc}")
+        await asyncio.to_thread(bot_services.cancel_login)
+        await update.message.reply_text(_login_error_hint(exc))
         return ConversationHandler.END
 
 
@@ -127,8 +144,9 @@ async def login_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await update.message.reply_text(msg)
         return LOGIN_CODE
     except Exception as exc:
-        await update.message.reply_text(f"Ошибка: {exc}")
-        return LOGIN_PHONE
+        await asyncio.to_thread(bot_services.cancel_login)
+        await update.message.reply_text(_login_error_hint(exc))
+        return ConversationHandler.END
 
 
 async def login_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -137,11 +155,13 @@ async def login_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         msg = await asyncio.to_thread(bot_services.submit_login_code, code)
         await update.message.reply_text(msg, reply_markup=main_menu_keyboard())
     except Exception as exc:
-        await update.message.reply_text(f"Ошибка: {exc}")
+        await asyncio.to_thread(bot_services.cancel_login)
+        await update.message.reply_text(_login_error_hint(exc), reply_markup=main_menu_keyboard())
     return ConversationHandler.END
 
 
 async def login_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await asyncio.to_thread(bot_services.cancel_login)
     await update.message.reply_text("Вход отменён.", reply_markup=main_menu_keyboard())
     return ConversationHandler.END
 

@@ -1,3 +1,4 @@
+import logging
 import queue
 import threading
 from enum import Enum
@@ -9,11 +10,20 @@ from app.config import settings
 from app.services.runtime_env import is_railway_runtime, require_headless_browser
 from app.services.scraper import (
     LOGIN_URL,
+    click_login_next,
     dismiss_overlays,
     ensure_chromium_installed,
+    find_login_otp_input,
+    find_login_phone_input,
+    login_browser_context_kwargs,
+    normalize_phone,
+    save_login_debug_screenshot,
     save_session,
     setup_playwright_browsers_path,
+    wait_for_login_code_step,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class LoginState(str, Enum):
@@ -72,27 +82,46 @@ class LoginManager:
     def start(self) -> None:
         with self._lock:
             if self._state not in (LoginState.IDLE, LoginState.COMPLETED, LoginState.FAILED):
-                raise RuntimeError(f"Вход уже в процессе: {self._state}")
+                raise RuntimeError(
+                    f"Вход уже в процессе ({self._state.value}). Отправьте /cancel и снова /login."
+                )
             self._error = None
-        self._run_cmd("start", timeout=60)
+        self._run_cmd("start", timeout=90)
 
     def submit_phone(self, phone: str) -> None:
         with self._lock:
             if self._state != LoginState.WAITING_PHONE:
-                raise RuntimeError("Сейчас не ожидается ввод телефона")
-        self._run_cmd("phone", phone, timeout=60)
+                raise RuntimeError(
+                    f"Сейчас не ожидается телефон (состояние: {self._state.value}). "
+                    "Отправьте /login чтобы начать заново."
+                )
+        self._run_cmd("phone", phone, timeout=90)
 
     def submit_code(self, code: str) -> None:
         with self._lock:
             if self._state != LoginState.WAITING_CODE:
-                raise RuntimeError("Сейчас не ожидается ввод кода")
-        self._run_cmd("code", code, timeout=90)
+                raise RuntimeError(
+                    f"Сейчас не ожидается код (состояние: {self._state.value}). "
+                    "Отправьте /login чтобы начать заново."
+                )
+        self._run_cmd("code", code, timeout=120)
 
     def cancel(self) -> None:
         try:
-            self._run_cmd("cancel", timeout=10)
+            self._run_cmd("cancel", timeout=15)
         except Exception:
             self._set_state(LoginState.IDLE)
+
+    def _open_login_page(self, page: Page) -> None:
+        page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=45_000)
+        dismiss_overlays(page)
+
+        login_btn = page.get_by_role("button", name="Войти")
+        if login_btn.count():
+            login_btn.first.click()
+            page.wait_for_timeout(800)
+
+        find_login_phone_input(page).wait_for(state="visible", timeout=20_000)
 
     def _worker_loop(self) -> None:
         playwright = None
@@ -139,61 +168,46 @@ class LoginManager:
 
                     playwright = sync_playwright().start()
                     browser = playwright.chromium.launch(headless=settings.headless)
-                    context = browser.new_context(viewport={"width": 1280, "height": 900})
+                    context = browser.new_context(**login_browser_context_kwargs())
                     page = context.new_page()
 
-                    page.goto(LOGIN_URL, wait_until="domcontentloaded")
-                    dismiss_overlays(page)
-
-                    login_btn = page.get_by_role("button", name="Войти")
-                    if login_btn.count():
-                        login_btn.first.click()
-
+                    self._open_login_page(page)
                     self._set_state(LoginState.WAITING_PHONE)
                     cmd.done.put(None)
 
                 elif cmd.action == "phone":
                     if not page:
-                        raise RuntimeError("Браузер не инициализирован")
+                        raise RuntimeError("Браузер не инициализирован. Отправьте /login.")
 
                     self._set_state(LoginState.STARTING)
-                    phone = str(cmd.payload)
+                    phone = normalize_phone(str(cmd.payload))
 
-                    phone_input = page.locator('input[type="tel"]:not([disabled])').last
-                    if phone_input.count() == 0:
-                        phone_input = page.get_by_role("textbox").nth(1)
-                    phone_input.wait_for(state="visible", timeout=15_000)
+                    phone_input = find_login_phone_input(page)
+                    phone_input.wait_for(state="visible", timeout=20_000)
                     phone_input.click()
                     phone_input.fill(phone)
 
-                    next_btn = page.get_by_role("button", name="Дальше")
-                    if next_btn.count() == 0:
-                        next_btn = page.get_by_role("button", name="Продолжить")
-                    next_btn.click()
+                    click_login_next(page)
+                    wait_for_login_code_step(page, timeout=45_000)
 
-                    page.get_by_role("heading", name="Введите код из смс").wait_for(timeout=30_000)
                     self._set_state(LoginState.WAITING_CODE)
                     cmd.done.put(None)
 
                 elif cmd.action == "code":
                     if not page or not context:
-                        raise RuntimeError("Браузер не инициализирован")
+                        raise RuntimeError("Браузер не инициализирован. Отправьте /login.")
 
                     self._set_state(LoginState.STARTING)
-                    code = str(cmd.payload)
+                    code = str(cmd.payload).strip().replace(" ", "")
 
-                    otp_input = page.locator('input:not([disabled])[inputmode="numeric"]')
-                    if otp_input.count() == 0:
-                        otp_input = page.locator('input:not([disabled])[autocomplete="one-time-code"]')
-                    if otp_input.count() == 0:
-                        otp_input = page.locator("input:not([disabled])").last
-                    otp_input.wait_for(state="visible", timeout=15_000)
+                    otp_input = find_login_otp_input(page)
+                    otp_input.wait_for(state="visible", timeout=20_000)
                     otp_input.click()
                     otp_input.fill(code)
 
                     page.wait_for_function(
                         "() => !window.location.pathname.includes('/account/login')",
-                        timeout=60_000,
+                        timeout=90_000,
                     )
 
                     save_session(context, settings.session_file)
@@ -207,6 +221,9 @@ class LoginManager:
                     cmd.done.put(None)
 
             except Exception as exc:
+                if page is not None:
+                    save_login_debug_screenshot(page, settings.session_file, cmd.action)
+                logger.exception("HH login failed at %s", cmd.action)
                 cleanup()
                 self._set_state(LoginState.FAILED, str(exc))
                 cmd.done.put(exc)
