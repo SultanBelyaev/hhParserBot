@@ -342,6 +342,7 @@ def build_application(for_polling: bool = False) -> Application:
         },
         fallbacks=[CommandHandler("cancel", new_cancel)],
         allow_reentry=True,
+        per_message=True,
     )
 
     request = HTTPXRequest(
