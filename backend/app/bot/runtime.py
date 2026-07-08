@@ -31,7 +31,9 @@ async def start_telegram_webhook() -> Application:
     await app.start()
     await app.bot.set_webhook(url=url, drop_pending_updates=True)
     touch_heartbeat()
-    logger.info("Telegram webhook active: %s", url)
+    me = await app.bot.get_me()
+    logger.info("Telegram webhook active: %s (@%s)", url, me.username)
+    app.bot_data["username"] = me.username
     return app
 
 

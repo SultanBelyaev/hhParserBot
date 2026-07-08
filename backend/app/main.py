@@ -76,11 +76,16 @@ def health(request: Request):
             else:
                 bot_status = "no_heartbeat"
     allowed = settings.telegram_allowed_user_ids.strip()
+    bot_username = None
+    bot_app = getattr(request.app.state, "bot_application", None)
+    if bot_app is not None:
+        bot_username = bot_app.bot_data.get("username")
     return {
         "status": "ok",
         "mode": "telegram-bot",
         "bot": bot_status,
         "bot_mode": bot_mode,
+        "bot_username": f"@{bot_username}" if bot_username else None,
         "webhook_url": settings.telegram_webhook_url or None,
         "telegram_allowed_user_ids_set": bool(allowed),
     }
