@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from telegram import Update
+from telegram.error import Conflict
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -331,19 +332,24 @@ def build_application() -> Application:
         proxy=settings.telegram_proxy_url.strip() or None,
     )
 
-    async def _touch_heartbeat(_application: Application) -> None:
+    async def _on_bot_start(application: Application) -> None:
         import time
+
+        info = await application.bot.get_webhook_info()
+        if info.url:
+            logger.warning("Removing active webhook: %s", info.url)
+        await application.bot.delete_webhook(drop_pending_updates=True)
 
         settings.bot_heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
         settings.bot_heartbeat_file.write_text(str(time.time()), encoding="utf-8")
-        logger.info("Bot polling active, heartbeat written")
+        logger.info("Bot ready for polling, heartbeat written")
 
     app = (
         Application.builder()
         .token(settings.telegram_bot_token)
         .request(request)
         .get_updates_request(request)
-        .post_init(_touch_heartbeat)
+        .post_init(_on_bot_start)
         .build()
     )
     app.add_handler(CommandHandler("start", start_cmd))
@@ -358,6 +364,8 @@ def build_application() -> Application:
 
 
 def run_bot() -> None:
+    import time
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [bot] %(levelname)s %(name)s: %(message)s",
@@ -375,22 +383,31 @@ def run_bot() -> None:
         settings.session_file,
     )
 
-    app = build_application()
-
     proxy_hint = f" (proxy: {settings.telegram_proxy_url})" if settings.telegram_proxy_url.strip() else ""
-    logger.info("Telegram bot starting%s", proxy_hint)
-    try:
-        app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
-    except Exception as exc:
-        exc_name = type(exc).__name__
-        if exc_name == "Conflict":
-            raise RuntimeError(
-                "Бот уже запущен в другом месте (локально или другой инстанс Railway).\n"
-                "Остановите локальный run_bot.py и redeploy."
-            ) from exc
-        if "TimedOut" in exc_name or "Connect" in str(exc):
-            raise RuntimeError(
-                "Не удалось подключиться к api.telegram.org.\n"
-                "Проверьте TELEGRAM_BOT_TOKEN и регион Railway (US/EU)."
-            ) from exc
-        raise
+
+    while True:
+        logger.info("Telegram bot starting%s", proxy_hint)
+        try:
+            app = build_application()
+            app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+            return
+        except Conflict:
+            logger.error(
+                "Conflict: другой процесс уже использует этот токен бота. "
+                "Остановите локальный `python run_bot.py` на Mac и убедитесь, "
+                "что в Railway только 1 реплика. Retry через 60s..."
+            )
+            time.sleep(60)
+        except KeyboardInterrupt:
+            logger.info("Bot stopped")
+            return
+        except Exception as exc:
+            exc_name = type(exc).__name__
+            if "TimedOut" in exc_name or "Connect" in str(exc):
+                logger.error(
+                    "Не удалось подключиться к api.telegram.org. Retry через 30s..."
+                )
+                time.sleep(30)
+                continue
+            logger.exception("Bot crashed, retry in 15s")
+            time.sleep(15)

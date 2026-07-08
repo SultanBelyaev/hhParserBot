@@ -43,15 +43,8 @@ API_PID=$!
 
 BOT_PID=""
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-  (
-    while true; do
-      echo "[bot] starting..."
-      python run_bot.py 2>&1 | while IFS= read -r line; do echo "[bot] $line"; done
-      code=${PIPESTATUS[0]}
-      echo "[bot] exited with code ${code}, restart in 15s"
-      sleep 15
-    done
-  ) &
+  echo "[bot] starting..."
+  python run_bot.py 2>&1 | while IFS= read -r line; do echo "[bot] $line"; done &
   BOT_PID=$!
 else
   echo "TELEGRAM_BOT_TOKEN not set — bot skipped"
