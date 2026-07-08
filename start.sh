@@ -7,7 +7,10 @@ mkdir -p "${DATA_DIR:-/data}"
 
 restore_session_from_base64() {
   local target="${SESSION_FILE:-/data/session.json}"
-  echo "$1" | base64 -d > "$target"
+  if ! echo "$1" | base64 -d > "$target" 2>/dev/null; then
+    echo "WARNING: failed to decode SESSION_JSON_BASE64 — check Railway variable" >&2
+    return 1
+  fi
   echo "Session restored to $target ($(wc -c < "$target") bytes)"
 }
 
@@ -24,9 +27,9 @@ if [ -n "${SESSION_JSON_B64_PARTS:-}" ]; then
     combined+="$part"
     i=$((i + 1))
   done
-  restore_session_from_base64 "$combined"
+  restore_session_from_base64 "$combined" || true
 elif [ -n "${SESSION_JSON_BASE64:-}" ]; then
-  restore_session_from_base64 "$SESSION_JSON_BASE64"
+  restore_session_from_base64 "$SESSION_JSON_BASE64" || true
 fi
 
 export DATA_DIR="${DATA_DIR:-/data}"
@@ -53,8 +56,5 @@ term_handler() {
 }
 trap term_handler SIGTERM SIGINT
 
-if [ -n "$BOT_PID" ]; then
-  wait -n "$API_PID" "$BOT_PID"
-else
-  wait "$API_PID"
-fi
+# Keep API alive even if bot exits (Railway healthcheck depends on HTTP)
+wait "$API_PID"
