@@ -34,11 +34,17 @@ def get_auth_status():
 def start_login():
     try:
         login_manager.start()
+        if settings.headless:
+            message = "Браузер запущен в headless-режиме. Введите номер телефона ниже."
+        else:
+            message = "Откроется окно браузера. Введите номер телефона в админке."
         return LoginStartResponse(
             status=login_manager.state.value,
-            message="Откроется окно браузера. Введите номер телефона в админке.",
+            message=message,
         )
     except RuntimeError as exc:
+        return LoginStartResponse(status="error", message=str(exc))
+    except Exception as exc:
         return LoginStartResponse(status="error", message=str(exc))
 
 

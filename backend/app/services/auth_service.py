@@ -6,6 +6,7 @@ from typing import Any, Optional
 from playwright.sync_api import sync_playwright
 
 from app.config import settings
+from app.services.runtime_env import is_railway_runtime, require_headless_browser
 from app.services.scraper import (
     LOGIN_URL,
     dismiss_overlays,
@@ -124,11 +125,20 @@ class LoginManager:
                 if cmd.action == "start":
                     cleanup()
                     self._set_state(LoginState.STARTING)
+                    if is_railway_runtime() and not settings.headless:
+                        raise RuntimeError(
+                            "На Railway браузер работает только headless. Установите HEADLESS=true."
+                        )
+                    if not require_headless_browser() and not settings.headless:
+                        raise RuntimeError(
+                            "Нет графического дисплея. Установите HEADLESS=true или выполните вход локально: python login.py"
+                        )
+
                     setup_playwright_browsers_path()
                     ensure_chromium_installed()
 
                     playwright = sync_playwright().start()
-                    browser = playwright.chromium.launch(headless=False)
+                    browser = playwright.chromium.launch(headless=settings.headless)
                     context = browser.new_context(viewport={"width": 1280, "height": 900})
                     page = context.new_page()
 

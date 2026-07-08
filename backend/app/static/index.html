@@ -187,12 +187,20 @@
     let lastLoginState = null;
 
     async function startLogin() {
-      showMsg("info", "Откроется окно браузера. Введите телефон и код ниже.");
-      await api("/api/auth/login/start", { method: "POST" });
-      lastLoginState = null;
-      renderLoginForm();
-      if (loginPoll) clearInterval(loginPoll);
-      loginPoll = setInterval(pollLogin, 1500);
+      try {
+        const res = await api("/api/auth/login/start", { method: "POST" });
+        if (res.status === "error") {
+          showMsg("error", res.message || "Ошибка входа");
+          return;
+        }
+        showMsg("info", res.message || "Введите телефон и код ниже.");
+        lastLoginState = null;
+        renderLoginForm();
+        if (loginPoll) clearInterval(loginPoll);
+        loginPoll = setInterval(pollLogin, 1500);
+      } catch (e) {
+        showMsg("error", e.message);
+      }
     }
 
     async function pollLogin() {
