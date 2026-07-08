@@ -323,6 +323,7 @@ def build_application() -> Application:
         },
         fallbacks=[CommandHandler("cancel", new_cancel)],
         allow_reentry=True,
+        per_message=True,
     )
 
     request = HTTPXRequest(
