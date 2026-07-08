@@ -1,6 +1,13 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
+watchPatterns = [
+  "backend/**",
+  "Dockerfile",
+  "start.sh",
+  "railway.toml",
+  "scripts/**",
+]
 
 [deploy]
 healthcheckPath = "/api/health"

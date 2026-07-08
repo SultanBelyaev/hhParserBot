@@ -145,6 +145,12 @@ TELEGRAM_PROXY_URL=
    - **Telegram-бот** (если задан `TELEGRAM_BOT_TOKEN`)
 3. Дождитесь статуса **Deployed** и зелёного healthcheck `/api/health`
 
+### Авто-деплой при каждом push
+
+После первого деплоя включите **Settings → Automatic Deployments → Enable** (ветка `main`).
+
+Дальше каждый push в GitHub автоматически пересобирает сервис. Подробнее: [`AUTO_DEPLOY.md`](AUTO_DEPLOY.md).
+
 ### Проверка
 
 ```bash

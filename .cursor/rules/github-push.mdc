@@ -15,6 +15,14 @@ alwaysApply: true
    ```
 3. Не проси пользователя присылать токен в чат — только в локальный `.env`.
 4. Не коммить: `.env`, `data/session.json`, `*.db`, `.venv/`.
-5. После push сообщи URL репозитория.
+5. После push сообщи URL репозитория и что Railway автоматически задеплоит (если подключён репозиторий и включён Automatic Deployments).
+
+## Авто-деплой Railway
+
+Push в `main` → Railway пересобирает проект автоматически (см. `AUTO_DEPLOY.md`).
+
+Один раз пользователь должен в Railway:
+- подключить `SultanBelyaev/hhParserBot`
+- включить **Automatic Deployments** на ветке `main`
 
 Если push падает с ошибкой авторизации — попроси обновить `GITHUB_TOKEN` в `.env` (Settings → Developer settings → Tokens).
