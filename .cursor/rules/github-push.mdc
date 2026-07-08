@@ -1,0 +1,20 @@
+---
+description: Автоматический push изменений на GitHub после задач пользователя
+alwaysApply: true
+---
+
+# GitHub push
+
+Когда пользователь просит залить/запушить изменения на GitHub, или после завершения крупной задачи по явной просьбе:
+
+1. Убедись, что в `.env` заданы `GITHUB_TOKEN` и `GITHUB_REPO` (формат `username/hh-parser`). Токен в git не коммитить.
+2. Выполни:
+   ```bash
+   cd "/Users/sultanbelaev/Desktop/hh parser"
+   python3 scripts/git_push.py "краткое описание изменений"
+   ```
+3. Не проси пользователя присылать токен в чат — только в локальный `.env`.
+4. Не коммить: `.env`, `data/session.json`, `*.db`, `.venv/`.
+5. После push сообщи URL репозитория.
+
+Если push падает с ошибкой авторизации — попроси обновить `GITHUB_TOKEN` в `.env` (Settings → Developer settings → Tokens).
