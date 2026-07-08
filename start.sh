@@ -5,9 +5,28 @@ cd /app/backend
 
 mkdir -p "${DATA_DIR:-/data}"
 
-if [ -n "${SESSION_JSON_BASE64:-}" ]; then
-  echo "$SESSION_JSON_BASE64" | base64 -d > "${SESSION_FILE:-/data/session.json}"
-  echo "Session restored from SESSION_JSON_BASE64"
+restore_session_from_base64() {
+  local target="${SESSION_FILE:-/data/session.json}"
+  echo "$1" | base64 -d > "$target"
+  echo "Session restored to $target ($(wc -c < "$target") bytes)"
+}
+
+if [ -n "${SESSION_JSON_B64_PARTS:-}" ]; then
+  combined=""
+  i=1
+  while [ "$i" -le "$SESSION_JSON_B64_PARTS" ]; do
+    var_name="SESSION_JSON_B64_${i}"
+    part="${!var_name:-}"
+    if [ -z "$part" ]; then
+      echo "Missing ${var_name}" >&2
+      exit 1
+    fi
+    combined+="$part"
+    i=$((i + 1))
+  done
+  restore_session_from_base64 "$combined"
+elif [ -n "${SESSION_JSON_BASE64:-}" ]; then
+  restore_session_from_base64 "$SESSION_JSON_BASE64"
 fi
 
 export DATA_DIR="${DATA_DIR:-/data}"

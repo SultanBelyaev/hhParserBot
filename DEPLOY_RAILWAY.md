@@ -88,32 +88,37 @@ git push -u origin main
 
 ### Сессия HH (один из способов)
 
-**Способ A — через base64 (проще для первого деплоя):**
+> **Лимит Railway:** одна Variable — максимум **32 768 символов**.  
+> Полный `session.json` (~650 KB) не влезает. Используйте **cookies-only** (скрипт ниже) или **Volume**.
+
+**Способ A — через base64 (рекомендуется, ~24 KB):**
 
 ```bash
 chmod +x scripts/encode_session.sh
 ./scripts/encode_session.sh
 ```
 
-Скопируйте вывод в переменную:
+Скрипт кодирует только **cookies** (без localStorage) — этого достаточно для HH.
+
+Скопируйте строку `SESSION_JSON_BASE64=...` в Railway Variables (или только значение после `=`).
 
 | Переменная | Значение |
 |------------|----------|
-| `SESSION_JSON_BASE64` | длинная строка base64 |
+| `SESSION_JSON_BASE64` | строка из вывода скрипта (~24 000 символов) |
 
 При каждом старте контейнер восстановит `/data/session.json`.
 
-**Способ B — через Volume:**
+**Способ B — через Volume (если base64 не подходит):**
 
-1. Один раз залейте файл на volume через Railway CLI:
-   ```bash
-   npm i -g @railway/cli
-   railway login
-   railway link
-   railway run bash
-   # внутри контейнера — или scp/volume sync
-   ```
-2. Либо обновляйте `SESSION_JSON_BASE64` при истечении сессии.
+```bash
+npm i -g @railway/cli
+railway login
+railway link
+chmod +x scripts/upload_session_railway.sh
+./scripts/upload_session_railway.sh
+```
+
+Переменную `SESSION_JSON_BASE64` можно **не задавать** — файл уже на volume.
 
 ### Опциональные (производительность)
 
@@ -205,7 +210,8 @@ curl https://ВАШ-ДОМЕН.railway.app/api/health
 | Проблема | Решение |
 |----------|---------|
 | `TimedOut` у бота | Смените регион на US/EU |
-| `Сессия недействительна` | Обновите `SESSION_JSON_BASE64` |
+| `Variable value exceeds 32768` | Используйте `./scripts/encode_session.sh` (cookies-only), не полный файл |
+| `Сессия недействительна` | Обновите `SESSION_JSON_BASE64` или перезалейте на Volume |
 | Healthcheck failed | Проверьте логи: `railway logs` |
 | Chromium не найден | Убедитесь, что деплой идёт через Dockerfile, не Nixpacks |
 | База пустая после redeploy | Подключите Volume на `/data` |
