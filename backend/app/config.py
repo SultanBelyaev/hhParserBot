@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     apply_poll_timeout_sec: float = 5.0
     hide_skipped_vacancies: bool = False
     block_media: bool = True
-    frontend_url: str = "http://localhost:5173"
     default_cover_letter: str = (
         "Аналитик с хорошим техническим бэкграундом и опытом проектирования сложных IT-решений. "
         "Имею высшее техническое образование (ВШЭ), что позволяет глубоко разбираться в архитектуре систем, "

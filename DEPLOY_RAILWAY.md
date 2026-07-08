@@ -6,10 +6,10 @@
 
 | Компонент | В облаке |
 |-----------|----------|
-| FastAPI (`/api/health`, админка `/`) | ✅ |
-| Telegram-бот | ✅ (доступ к `api.telegram.org` из EU/US) |
+| FastAPI (`/api/health`, Telegram webhook) | ✅ |
+| Telegram-бот | ✅ (webhook, EU/US) |
 | Playwright-автоотклики | ✅ headless |
-| Вход в HH через браузер | ❌ только локально → загрузка `session.json` |
+| Вход в HH | ✅ через бота `/login` (headless) или `SESSION_JSON_BASE64` |
 
 ---
 
@@ -140,9 +140,7 @@ TELEGRAM_PROXY_URL=
 ## Шаг 5. Деплой
 
 1. Railway автоматически соберёт Docker-образ и запустит `start.sh`
-2. `start.sh` поднимает:
-   - **Uvicorn** на порту `$PORT` (API + веб-админка)
-   - **Telegram-бот** (если задан `TELEGRAM_BOT_TOKEN`)
+2. `start.sh` поднимает **Uvicorn** (health + Telegram webhook + бот)
 3. Дождитесь статуса **Deployed** и зелёного healthcheck `/api/health`
 
 ### Авто-деплой при каждом push

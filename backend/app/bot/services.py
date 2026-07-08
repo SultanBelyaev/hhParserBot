@@ -22,7 +22,7 @@ def get_auth_status() -> dict:
 
 def start_login() -> str:
     login_manager.start()
-    return "Откроется окно браузера. Отправьте номер телефона следующим сообщением."
+    return "Отправьте номер телефона следующим сообщением (формат: +79...)."
 
 
 def get_login_state() -> dict:

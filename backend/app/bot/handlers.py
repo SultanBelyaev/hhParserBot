@@ -23,7 +23,7 @@ from app.bot.keyboards import (
 from app.bot import services as bot_services
 from app.config import ROOT_DIR, settings
 from app.database import Base, engine
-from app.main import _migrate_schema
+from app.db_migrations import migrate_schema
 
 logger = logging.getLogger(__name__)
 
@@ -372,7 +372,7 @@ def run_bot() -> None:
     )
     settings.session_file.parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
-    _migrate_schema()
+    migrate_schema()
 
     token = settings.telegram_bot_token.strip()
     allowed = _allowed_user_ids()

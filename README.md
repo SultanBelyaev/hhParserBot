@@ -1,29 +1,22 @@
 # HH Parser — Система автооткликов на hh.ru
 
-Массовые автоотклики на вакансии hh.ru через **парсинг** (Playwright), без использования официального API.
+Массовые автоотклики на вакансии hh.ru через **парсинг** (Playwright). Управление — **только через Telegram-бота**.
 
 ## Архитектура
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│              Web Admin (React + Vite)                    │
-│  • Вход в аккаунт HH (телефон + SMS)                    │
-│  • Создание кампаний (запрос, регион, лимит)            │
-│  • Запуск / остановка / мониторинг прогресса            │
-└──────────────────────┬──────────────────────────────────┘
-                       │ REST API
-┌──────────────────────▼──────────────────────────────────┐
-│              FastAPI Backend                               │
-│  • Управление кампаниями и логами (SQLite)              │
-│  • Фоновый воркер (thread) для Playwright               │
-│  • Менеджер сессии (storage_state JSON)                 │
+│              Telegram-бот                                │
+│  • Вход в HH (телефон + SMS)                            │
+│  • Создание и запуск кампаний                           │
+│  • Статистика и логи откликов                          │
 └──────────────────────┬──────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────┐
-│         Playwright Scraper                               │
-│  • Авторизация через cookies (без API)                  │
-│  • Парсинг SERP: скролл + извлечение карточек         │
-│  • Автоотклик: клик, модалки, тесты, сопроводительное │
+│              FastAPI + Playwright Worker                 │
+│  • SQLite (кампании, логи)                              │
+│  • Фоновый воркер автооткликов                          │
+│  • Webhook для Telegram (Railway)                       │
 └──────────────────────┬──────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────┐
@@ -31,148 +24,73 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Почему парсинг, а не API
-
-Официальный API hh.ru требует регистрации приложения на dev.hh.ru и имеет ограничения. Парсинг через браузер:
-- Работает с обычным аккаунтом соискателя
-- Повторяет реальные действия пользователя
-- Не требует OAuth-приложения
-
-### Кампания — основная бизнес-сущность
-
-| Поле | Описание |
-|------|----------|
-| `search_query` | Поисковый запрос (например, «Python разработчик») |
-| `area_id` | Регион (1 = Москва, 2 = СПб, пусто = вся Россия) |
-| `apply_limit` | Сколько откликов сделать (1–500) |
-| `status` | draft → running → completed / paused / failed |
-
-### Логика отклика
-
-1. Поиск вакансий по запросу
-2. Бесконечный скролл для загрузки всех карточек
-3. Фильтр: только вакансии с кнопкой «Откликнуться»
-4. Для каждой вакансии:
-   - **Отправлен** — простой отклик в один клик
-   - **Пропущен** — тест, обязательное сопроводительное, доп. шаги
-   - **Ошибка** — карточка не найдена, таймаут
-
-## Telegram-бот (админка)
-
-Управление через Telegram вместо веб-админки.
-
-### Настройка
-
-1. Добавьте в `.env`:
-```env
-TELEGRAM_BOT_TOKEN=ваш_токен_от_BotFather
-TELEGRAM_ALLOWED_USER_IDS=ваш_telegram_id
-```
-
-2. Узнайте свой Telegram ID — отправьте боту `/start`, он покажет ID.
-
-3. Запустите бота:
-```bash
-cd backend && python run_bot.py
-```
-
-### Команды бота
-
-| Команда / кнопка | Действие |
-|------------------|----------|
-| `/start` | Приветствие и меню |
-| `/status` | Статус сессии HH |
-| `/login` | Вход в HH (телефон + SMS) |
-| `/logout` | Удалить сессию |
-| `/campaigns` | Список кампаний |
-| `/new` | Создать кампанию |
-| Кнопки под кампанией | Статистика, лог, запуск, стоп |
-
-> **Безопасность:** не публикуйте токен бота. Если он утёк — перевыпустите через [@BotFather](https://t.me/BotFather) командой `/revoke`.
-
----
-
-## Деплой в облако
-
-Полная инструкция: **[DEPLOY_RAILWAY.md](./DEPLOY_RAILWAY.md)**
-
-Кратко: GitHub → Railway → Volume `/data` → переменные → `SESSION_JSON_BASE64`.
-
----
-
 ## Быстрый старт
 
 ### 1. Установка
 
 ```bash
 cd "hh parser"
-
-# Python-окружение
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
 python3 -m playwright install chromium
-
-# Фронтенд
-cd frontend && npm install && cd ..
-```
-
-### 2. Конфигурация
-
-```bash
 cp .env.example .env
 ```
 
-### 3. Вход в аккаунт HH
+### 2. Настройка `.env`
 
-**Вариант A — через админку** (рекомендуется):
-```bash
-# Терминал 1: бэкенд
-cd backend && uvicorn app.main:app --reload --port 8000
-
-# Терминал 2: фронтенд
-cd frontend && npm run dev
-```
-Откройте http://localhost:5173 → «Войти в аккаунт» → телефон + SMS.
-
-**Вариант B — через CLI**:
-```bash
-python3 login.py
+```env
+TELEGRAM_BOT_TOKEN=ваш_токен_от_BotFather
+TELEGRAM_ALLOWED_USER_IDS=ваш_telegram_id
 ```
 
-### 4. Запуск автооткликов
+### 3. Запуск
 
-**Без Node.js (рекомендуется):**
+**Локально (API + бот polling):**
 
 ```bash
 cd "/Users/sultanbelaev/Desktop/hh parser"
 source .venv/bin/activate
-cd backend && uvicorn app.main:app --reload --port 8000
+cd backend && uvicorn app.main:app --port 8001
 ```
 
-Откройте **http://localhost:8000** — админка встроена в бэкенд.
-
-**С React-фронтендом (нужен Node.js):**
+В другом терминале (если uvicorn без webhook):
 
 ```bash
-cd frontend && npm install && npm run dev
+cd backend && python run_bot.py
 ```
 
-Откройте http://localhost:5173
+**Или только бот локально:**
 
-## API
+```bash
+cd backend && python run_bot.py
+```
 
-| Метод | Путь | Описание |
-|-------|------|----------|
-| GET | `/api/auth/status` | Статус сессии |
-| POST | `/api/auth/login/start` | Начать вход |
-| POST | `/api/auth/login/phone` | Отправить телефон |
-| POST | `/api/auth/login/code` | Отправить SMS-код |
-| GET | `/api/campaigns` | Список кампаний |
-| POST | `/api/campaigns` | Создать кампанию |
-| POST | `/api/campaigns/{id}/start` | Запустить |
-| POST | `/api/campaigns/{id}/stop` | Остановить |
-| GET | `/api/campaigns/{id}/logs` | Лог откликов |
+### 4. Вход в HH
+
+Через бота: `/login` или кнопка **🔐 Войти** → телефон → SMS-код.
+
+Альтернатива — CLI:
+
+```bash
+python login.py
+```
+
+## Команды бота
+
+| Команда / кнопка | Действие |
+|------------------|----------|
+| `/start` | Приветствие и меню |
+| `/status` | Статус сессии HH |
+| `/login` | Вход в HH |
+| `/logout` | Удалить сессию |
+| `/campaigns` | Список кампаний |
+| `/new` | Новая кампания |
+| Кнопки под кампанией | Статистика, лог, ▶️, ⏹ |
+
+## Деплой в облако
+
+См. **[DEPLOY_RAILWAY.md](./DEPLOY_RAILWAY.md)** и **[AUTO_DEPLOY.md](./AUTO_DEPLOY.md)**.
 
 ## Структура проекта
 
@@ -180,33 +98,36 @@ cd frontend && npm install && npm run dev
 hh parser/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI entry point
-│   │   ├── models.py            # Campaign, ApplicationLog
-│   │   ├── routers/             # auth, campaigns
-│   │   └── services/
-│   │       ├── scraper.py       # Playwright-парсер
-│   │       ├── worker.py        # Фоновый воркер кампаний
-│   │       └── auth_service.py  # Вход через браузер
+│   │   ├── main.py           # FastAPI: health + Telegram webhook
+│   │   ├── bot/              # Telegram-бот
+│   │   ├── models.py
+│   │   └── services/         # scraper, worker, auth
+│   ├── run_bot.py            # Локальный polling-бот
 │   └── requirements.txt
-├── frontend/                    # React-админка
-├── login.py                     # CLI-вход
-├── data/session.json            # Сессия HH (gitignored)
+├── login.py                  # CLI-вход в HH
+├── scripts/
 └── .env
 ```
 
-## Ограничения и риски
+## API (служебный)
 
-- **DOM-изменения**: hh.ru может менять вёрстку — селекторы потребуют обновления
-- **Rate limiting**: между откликами есть задержка (`APPLY_DELAY_MS`), но hh может ограничивать активность
-- **Сложные отклики**: вакансии с тестами и обязательным сопроводительным пропускаются
-- **Сессия**: cookies истекают — потребуется повторный вход
-- **ToS**: автоматизация может нарушать пользовательское соглашение hh.ru
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/health` | Healthcheck (Railway) |
+| POST | `/telegram/webhook` | Webhook Telegram (Railway) |
 
 ## Переменные окружения
 
 | Переменная | По умолчанию | Описание |
 |------------|-------------|----------|
-| `HEADLESS` | `true` | Безголовый браузер |
-| `SCROLL_MAX` | `50` | Макс. скроллов при загрузке |
-| `APPLY_DELAY_MS` | `1500` | Пауза между откликами |
-| `SESSION_FILE` | `data/session.json` | Файл сессии |
+| `TELEGRAM_BOT_TOKEN` | — | Токен бота |
+| `TELEGRAM_ALLOWED_USER_IDS` | — | Telegram ID (через запятую) |
+| `HEADLESS` | `true` | Headless-браузер |
+| `SESSION_FILE` | `data/session.json` | Сессия HH |
+| `APPLY_DELAY_MS` | `700` | Пауза между откликами |
+
+## Ограничения
+
+- hh.ru может менять вёрстку — селекторы потребуют обновления
+- Сессия периодически истекает — повторный `/login`
+- Автоматизация может нарушать ToS hh.ru
