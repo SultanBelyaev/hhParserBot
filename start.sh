@@ -20,6 +20,8 @@ if [ -n "${SESSION_JSON_BASE64:-}" ] || [ -n "${SESSION_JSON_B64_PARTS:-}" ]; th
   python3 /app/scripts/restore_session_env.py || true
 fi
 
+python3 /app/scripts/check_deploy.py || true
+
 echo "Starting API on port ${PORT}..."
 uvicorn app.main:app --host 0.0.0.0 --port "${PORT}" &
 API_PID=$!

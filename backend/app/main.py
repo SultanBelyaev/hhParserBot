@@ -1,10 +1,13 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI, HTTPException, Request
 
 from app.config import settings
 from app.database import Base, engine
 from app.db_migrations import migrate_schema
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -14,10 +17,15 @@ async def lifespan(app: FastAPI):
     migrate_schema()
 
     app.state.bot_application = None
+    app.state.bot_startup_error = None
     if settings.should_use_telegram_webhook:
         from app.bot.runtime import start_telegram_webhook, stop_telegram_webhook
 
-        app.state.bot_application = await start_telegram_webhook()
+        try:
+            app.state.bot_application = await start_telegram_webhook()
+        except Exception as exc:
+            app.state.bot_startup_error = str(exc)
+            logger.exception("Telegram webhook failed to start")
 
     yield
 
@@ -53,7 +61,12 @@ def health(request: Request):
     if settings.telegram_bot_token.strip():
         if settings.should_use_telegram_webhook:
             bot_mode = "webhook"
-            bot_status = "running" if getattr(request.app.state, "bot_application", None) else "starting"
+            if getattr(request.app.state, "bot_application", None):
+                bot_status = "running"
+            elif getattr(request.app.state, "bot_startup_error", None):
+                bot_status = f"failed: {request.app.state.bot_startup_error[:120]}"
+            else:
+                bot_status = "starting"
         else:
             bot_mode = "polling"
             hb = settings.bot_heartbeat_file

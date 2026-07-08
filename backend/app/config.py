@@ -1,16 +1,27 @@
 import os
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-DATA_DIR = Path(os.getenv("DATA_DIR", str(ROOT_DIR / "data")))
-DEFAULT_SESSION_FILE = DATA_DIR / "session.json"
-DEFAULT_DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{(DATA_DIR / 'hh_parser.db').as_posix()}")
-
 load_dotenv(ROOT_DIR / ".env", override=False)
+
+
+def _default_sqlite_url() -> str:
+    data_dir = os.getenv("DATA_DIR", str(ROOT_DIR / "data"))
+    return f"sqlite:///{(Path(data_dir) / 'hh_parser.db').as_posix()}"
+
+
+def _default_session_file() -> Path:
+    data_dir = Path(os.getenv("DATA_DIR", str(ROOT_DIR / "data")))
+    raw = os.getenv("SESSION_FILE", str(data_dir / "session.json"))
+    path = Path(raw.strip().strip('"').strip("'"))
+    if not path.is_absolute():
+        path = data_dir / path
+    return path
 
 
 class Settings(BaseSettings):
@@ -20,16 +31,17 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = DEFAULT_DATABASE_URL
-    session_file: Path = Path(os.getenv("SESSION_FILE", str(DEFAULT_SESSION_FILE)))
-    headless: bool = True
-    scroll_max: int = 30
-    scroll_pause_ms: int = 500
-    scroll_buffer_factor: float = 1.5
-    apply_delay_ms: int = 700
-    apply_poll_timeout_sec: float = 5.0
-    hide_skipped_vacancies: bool = False
-    block_media: bool = True
+    database_url: str = Field(default_factory=_default_sqlite_url, validation_alias="DATABASE_URL")
+    session_file: Path = Field(default_factory=_default_session_file, validation_alias="SESSION_FILE")
+    data_dir: Path = Field(default=ROOT_DIR / "data", validation_alias="DATA_DIR")
+    headless: bool = Field(default=True, validation_alias="HEADLESS")
+    scroll_max: int = Field(default=30, validation_alias="SCROLL_MAX")
+    scroll_pause_ms: int = Field(default=500, validation_alias="SCROLL_PAUSE_MS")
+    scroll_buffer_factor: float = Field(default=1.5, validation_alias="SCROLL_BUFFER_FACTOR")
+    apply_delay_ms: int = Field(default=700, validation_alias="APPLY_DELAY_MS")
+    apply_poll_timeout_sec: float = Field(default=5.0, validation_alias="APPLY_POLL_TIMEOUT_SEC")
+    hide_skipped_vacancies: bool = Field(default=False, validation_alias="HIDE_SKIPPED_VACANCIES")
+    block_media: bool = Field(default=True, validation_alias="BLOCK_MEDIA")
     default_cover_letter: str = (
         "Аналитик с хорошим техническим бэкграундом и опытом проектирования сложных IT-решений. "
         "Имею высшее техническое образование (ВШЭ), что позволяет глубоко разбираться в архитектуре систем, "
@@ -50,16 +62,34 @@ class Settings(BaseSettings):
     public_url: str = Field(default="", validation_alias="PUBLIC_URL")
     telegram_use_webhook: bool = Field(default=False, validation_alias="TELEGRAM_USE_WEBHOOK")
 
-    @field_validator("telegram_bot_token", "telegram_allowed_user_ids", "telegram_proxy_url", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def _strip_env_quotes(cls, value: object) -> object:
+    def _strip_railway_quotes(cls, data: Any) -> Any:
+        """Railway Variables often come as \"value\" — strip outer quotes."""
+        if not isinstance(data, dict):
+            return data
+        cleaned: dict[Any, Any] = {}
+        for key, value in data.items():
+            if isinstance(value, str):
+                cleaned[key] = value.strip().strip('"').strip("'")
+            else:
+                cleaned[key] = value
+        return cleaned
+
+    @field_validator("session_file", "data_dir", mode="before")
+    @classmethod
+    def _coerce_path(cls, value: object) -> object:
         if isinstance(value, str):
-            return value.strip().strip('"').strip("'")
+            value = value.strip().strip('"').strip("'")
+            path = Path(value)
+            if not path.is_absolute() and os.getenv("DATA_DIR"):
+                path = Path(os.getenv("DATA_DIR", "").strip().strip('"').strip("'")) / path
+            return path
         return value
 
     @property
     def bot_heartbeat_file(self) -> Path:
-        return Path(os.getenv("DATA_DIR", str(ROOT_DIR / "data"))) / "bot.heartbeat"
+        return self.data_dir / "bot.heartbeat"
 
     @property
     def telegram_webhook_base_url(self) -> str:
