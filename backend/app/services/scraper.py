@@ -41,6 +41,7 @@ class ApplyResult:
 
 
 LOGIN_URL = "https://hh.ru/account/login?role=applicant&backurl=/"
+CARD_READ_TIMEOUT_MS = 3_000
 
 
 def _parse_int(text: str) -> Optional[int]:
@@ -257,16 +258,38 @@ def scroll_until_all_loaded(
                 break
 
 
+def _safe_response_button_text(card, *, timeout_ms: int = CARD_READ_TIMEOUT_MS) -> str | None:
+    resp = card.locator('[data-qa="vacancy-serp__vacancy_response"]')
+    if resp.count() == 0:
+        return None
+    try:
+        card.scroll_into_view_if_needed(timeout=timeout_ms)
+        return resp.first.inner_text(timeout=timeout_ms).strip().lower()
+    except PlaywrightTimeoutError:
+        return None
+    except Exception:
+        return None
+
+
+def _safe_card_text(card, selector: str, *, timeout_ms: int = CARD_READ_TIMEOUT_MS) -> str | None:
+    loc = card.locator(selector).first
+    if loc.count() == 0:
+        return None
+    try:
+        card.scroll_into_view_if_needed(timeout=timeout_ms)
+        return loc.inner_text(timeout=timeout_ms).strip()
+    except PlaywrightTimeoutError:
+        return None
+    except Exception:
+        return None
+
+
 def count_applicable_vacancies(page: Page) -> int:
     cards = page.locator('[data-qa="vacancy-serp__vacancy"]')
     count = 0
     for i in range(cards.count()):
-        card = cards.nth(i)
-        resp = card.locator('[data-qa="vacancy-serp__vacancy_response"]')
-        if resp.count() == 0:
-            continue
-        btn_text = resp.first.inner_text().strip().lower()
-        if "откликнуться" in btn_text:
+        btn_text = _safe_response_button_text(cards.nth(i))
+        if btn_text and "откликнуться" in btn_text:
             count += 1
     return count
 
@@ -321,24 +344,32 @@ def collect_vacancies_for_apply(page: Page, limit: int = 10) -> List[Vacancy]:
     for i in range(cards.count()):
         card = cards.nth(i)
 
-        resp = card.locator('[data-qa="vacancy-serp__vacancy_response"]')
-        if resp.count() == 0:
+        btn_text = _safe_response_button_text(card)
+        if not btn_text or "откликнуться" not in btn_text:
             continue
 
-        btn_text = resp.first.inner_text().strip().lower()
-        if "откликнуться" not in btn_text:
+        title = _safe_card_text(card, '[data-qa="serp-item__title-text"]')
+        if not title:
             continue
 
-        title = card.locator('[data-qa="serp-item__title-text"]').first.inner_text().strip()
-        href = card.locator('a[data-qa="serp-item__title"]').first.get_attribute("href") or ""
+        try:
+            href = card.locator('a[data-qa="serp-item__title"]').first.get_attribute("href") or ""
+        except PlaywrightTimeoutError:
+            continue
         match = re.search(r"/vacancy/(\d+)", href)
         if not match:
             continue
         vacancy_id = match.group(1)
 
+        watchers_text = "Сейчас смотрят —"
+        watchers_count: Optional[int] = None
         watchers_loc = card.locator('span:has-text("Сейчас смотрят")').first
-        watchers_text = watchers_loc.inner_text().strip() if watchers_loc.count() else "Сейчас смотрят —"
-        watchers_count = _parse_int(watchers_text)
+        if watchers_loc.count():
+            try:
+                watchers_text = watchers_loc.inner_text(timeout=CARD_READ_TIMEOUT_MS).strip()
+                watchers_count = _parse_int(watchers_text)
+            except PlaywrightTimeoutError:
+                pass
 
         result.append(
             Vacancy(
@@ -550,7 +581,10 @@ def is_apply_success(page: Page, card=None) -> bool:
     if card is not None:
         btn = card.locator('[data-qa="vacancy-serp__vacancy_response"]').first
         if btn.count():
-            text = btn.inner_text().strip().lower()
+            try:
+                text = btn.inner_text(timeout=CARD_READ_TIMEOUT_MS).strip().lower()
+            except PlaywrightTimeoutError:
+                text = ""
             if "откликнулись" in text or "отклик отправлен" in text:
                 return True
 
@@ -724,13 +758,17 @@ def run_campaign(
             if not search_has_vacancies(page):
                 return stats
 
-            scroll_until_enough_for_apply(
-                page,
-                apply_limit=apply_limit,
-                buffer_factor=scroll_buffer_factor,
-                pause_ms=scroll_pause_ms,
-                max_scrolls=scroll_max,
-            )
+            try:
+                scroll_until_enough_for_apply(
+                    page,
+                    apply_limit=apply_limit,
+                    buffer_factor=scroll_buffer_factor,
+                    pause_ms=scroll_pause_ms,
+                    max_scrolls=scroll_max,
+                )
+            except PlaywrightTimeoutError:
+                pass
+
             vacancies = collect_vacancies_for_apply(page, limit=apply_limit)
 
             if on_progress:
