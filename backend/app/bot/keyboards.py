@@ -78,6 +78,8 @@ def campaign_actions_keyboard(campaign_id: int, status: str) -> InlineKeyboardMa
     ]
     if status == "running":
         rows.append([InlineKeyboardButton("⏹ Остановить", callback_data=f"stop:{campaign_id}")])
+    elif status == "stopping":
+        rows.append([InlineKeyboardButton("⏳ Останавливается…", callback_data=f"noop:{campaign_id}")])
     else:
         rows.append([
             InlineKeyboardButton("▶️ Запустить", callback_data=f"start:{campaign_id}"),

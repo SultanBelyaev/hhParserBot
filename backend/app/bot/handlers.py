@@ -387,7 +387,9 @@ async def new_confirm_cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text(
             f"✅ Кампания создана: #{campaign.id} {campaign.name}\n\n"
             + bot_services.format_campaign_short(campaign),
-            reply_markup=campaign_actions_keyboard(campaign.id, campaign.status),
+            reply_markup=campaign_actions_keyboard(
+                campaign.id, bot_services.effective_status(campaign)
+            ),
         )
     except Exception as exc:
         await query.edit_message_text(friendly_error(exc))
@@ -486,7 +488,9 @@ async def campaign_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 raise ValueError("Кампания не найдена")
             await query.edit_message_text(
                 bot_services.format_campaign_short(campaign),
-                reply_markup=campaign_actions_keyboard(campaign.id, campaign.status),
+                reply_markup=campaign_actions_keyboard(
+                campaign.id, bot_services.effective_status(campaign)
+            ),
             )
             return
 
@@ -517,6 +521,17 @@ async def campaign_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 reply_markup=campaigns_list_keyboard(campaigns),
             )
             return
+        elif action == "noop":
+            await query.answer("Кампания останавливается, подождите…", show_alert=True)
+            campaign = await asyncio.to_thread(bot_services.get_campaign, campaign_id)
+            if campaign:
+                await query.edit_message_text(
+                    bot_services.format_campaign_short(campaign),
+                    reply_markup=campaign_actions_keyboard(
+                        campaign.id, bot_services.effective_status(campaign)
+                    ),
+                )
+            return
         elif action == "stats":
             stats = await asyncio.to_thread(bot_services.campaign_stats, campaign_id)
             await query.message.reply_text(bot_services.format_stats(stats))
@@ -531,7 +546,9 @@ async def campaign_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         campaign = await asyncio.to_thread(bot_services.get_campaign, campaign_id)
         await query.edit_message_text(
             text + "\n\n" + bot_services.format_campaign_short(campaign),
-            reply_markup=campaign_actions_keyboard(campaign.id, campaign.status),
+            reply_markup=campaign_actions_keyboard(
+                campaign.id, bot_services.effective_status(campaign)
+            ),
         )
     except Exception as exc:
         await query.message.reply_text(friendly_error(exc), reply_markup=retry_keyboard("campaigns"))
@@ -702,7 +719,7 @@ def build_application(for_polling: bool = False) -> Application:
     app.add_handler(login_conv, group=DEFAULT_GROUP)
     app.add_handler(new_conv, group=DEFAULT_GROUP)
     app.add_handler(
-        CallbackQueryHandler(campaign_callback, pattern=r"^(open|start|stop|delete|delete_yes|stats|logs):"),
+        CallbackQueryHandler(campaign_callback, pattern=r"^(open|start|stop|delete|delete_yes|stats|logs|noop):"),
         group=DEFAULT_GROUP,
     )
     app.add_handler(

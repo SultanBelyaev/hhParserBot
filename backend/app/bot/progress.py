@@ -6,6 +6,8 @@ import logging
 
 from telegram.ext import Application
 
+from app.services.worker import campaign_worker
+
 from app.bot import services as bot_services
 from app.bot.messages import format_campaign_finished, format_progress_update
 
@@ -29,7 +31,7 @@ async def _poll_campaign(
             if campaign is None:
                 return
 
-            if campaign.status != "running":
+            if not campaign_worker.is_running(campaign_id) and campaign.status != "running":
                 text = format_campaign_finished(campaign)
                 await app.bot.send_message(chat_id=chat_id, text=text)
                 return

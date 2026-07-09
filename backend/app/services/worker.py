@@ -45,6 +45,13 @@ class CampaignWorker:
             return True
         return False
 
+    def wait_until_stopped(self, campaign_id: int, *, timeout_sec: float = 90) -> bool:
+        thread = self._threads.get(campaign_id)
+        if thread is None or not thread.is_alive():
+            return True
+        thread.join(timeout=timeout_sec)
+        return not self.is_running(campaign_id)
+
     def _run_campaign(self, campaign_id: int, stop_event: threading.Event) -> None:
         db = SessionLocal()
         try:

@@ -10,6 +10,31 @@ from app.services.stats_service import DETAIL_LABELS, build_campaign_stats
 from app.services.worker import campaign_worker
 
 
+CAMPAIGN_STATUS_LABELS = {
+    "draft": "Черновик",
+    "running": "Запущена",
+    "stopping": "Останавливается",
+    "completed": "Завершена",
+    "paused": "Остановлена",
+    "failed": "Ошибка",
+}
+
+
+def effective_status(campaign: Campaign) -> str:
+    """Статус с учётом живого worker-потока (может расходиться с БД)."""
+    if campaign_worker.is_running(campaign.id):
+        if campaign.status == "stopping":
+            return "stopping"
+        return "running"
+    if campaign.status == "stopping":
+        return "paused"
+    return campaign.status
+
+
+def status_label(status: str) -> str:
+    return CAMPAIGN_STATUS_LABELS.get(status, status)
+
+
 def get_hh_status_quick() -> dict:
     """Быстрая проверка без Playwright (файл сессии)."""
     exists = settings.session_file.exists()
@@ -22,7 +47,7 @@ def get_hh_status_quick() -> dict:
 def get_dashboard_data() -> dict:
     quick = get_hh_status_quick()
     campaigns = list_campaigns()
-    running = [c for c in campaigns if c.status == "running"]
+    running = [c for c in campaigns if bot_services.effective_status(c) in ("running", "stopping")]
     return {
         "hh_connected": quick["connected"],
         "hh_message": quick["message"],
@@ -154,7 +179,9 @@ def start_campaign(campaign_id: int) -> Campaign:
         campaign = db.get(Campaign, campaign_id)
         if not campaign:
             raise ValueError("Кампания не найдена")
-        if campaign.status == "running":
+        if campaign_worker.is_running(campaign_id):
+            raise ValueError("Кампания ещё останавливается. Подождите 10–30 сек и нажмите ▶️ снова.")
+        if effective_status(campaign) == "running":
             raise ValueError("Кампания уже запущена")
 
         campaign_worker.start(campaign_id)
@@ -180,10 +207,26 @@ def stop_campaign(campaign_id: int) -> Campaign:
         if not campaign:
             raise ValueError("Кампания не найдена")
         campaign_worker.stop(campaign_id)
-        if campaign.status == "running":
+        if campaign_worker.is_running(campaign_id):
+            campaign.status = "stopping"
+        elif campaign.status in ("running", "stopping"):
             campaign.status = "paused"
         db.commit()
         db.refresh(campaign)
+        campaign_id_saved = campaign.id
+    finally:
+        db.close()
+
+    if campaign_worker.is_running(campaign_id_saved):
+        campaign_worker.wait_until_stopped(campaign_id_saved, timeout_sec=90)
+
+    db = SessionLocal()
+    try:
+        campaign = db.get(Campaign, campaign_id_saved)
+        if campaign and campaign.status in ("running", "stopping"):
+            campaign.status = "paused"
+            db.commit()
+            db.refresh(campaign)
         return campaign
     finally:
         db.close()
@@ -195,7 +238,7 @@ def delete_campaign(campaign_id: int) -> None:
         campaign = db.get(Campaign, campaign_id)
         if not campaign:
             raise ValueError("Кампания не найдена")
-        if campaign.status == "running":
+        if campaign.status == "running" or campaign_worker.is_running(campaign_id):
             raise ValueError("Сначала остановите кампанию")
         db.query(ApplicationLog).filter(ApplicationLog.campaign_id == campaign_id).delete()
         db.delete(campaign)
@@ -230,16 +273,10 @@ def campaign_logs(campaign_id: int, limit: int = 15) -> list[ApplicationLog]:
 
 
 def format_campaign_short(c: Campaign) -> str:
-    status_map = {
-        "draft": "Черновик",
-        "running": "Запущена",
-        "completed": "Завершена",
-        "paused": "Остановлена",
-        "failed": "Ошибка",
-    }
+    status = effective_status(c)
     return (
         f"#{c.id} {c.name}\n"
-        f"Статус: {status_map.get(c.status, c.status)}\n"
+        f"Статус: {status_label(status)}\n"
         f"Запрос: «{c.search_query}»\n"
         f"Прогресс: {c.processed_count}/{c.apply_limit} "
         f"(✅{c.sent_count} ⏭{c.skipped_count} ❌{c.failed_count})"
@@ -247,9 +284,13 @@ def format_campaign_short(c: Campaign) -> str:
 
 
 def format_stats(stats: dict) -> str:
+    raw_status = stats["campaign_status"]
+    display_status = status_label(
+        "running" if raw_status in ("running", "stopping") else raw_status
+    )
     lines = [
         f"📊 {stats['campaign_name']}",
-        f"Статус: {stats['campaign_status']}",
+        f"Статус: {display_status}",
         f"Успешность: {stats['rates']['success']}%",
         f"Найдено: {stats.get('vacancies_found') or '—'}",
         f"Обработано: {stats['processed_count']}/{stats['apply_limit']}",
