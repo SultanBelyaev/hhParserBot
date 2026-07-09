@@ -72,7 +72,20 @@ DEFAULT_GROUP = 0
 
 async def reset_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
-    await asyncio.to_thread(bot_services.cancel_login)
+    try:
+        await asyncio.wait_for(asyncio.to_thread(bot_services.cancel_login), timeout=3.0)
+    except (asyncio.TimeoutError, Exception):
+        logger.debug("cancel_login skipped during reset", exc_info=True)
+
+
+async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _deny(update):
+        return
+    bot_username = context.bot.username or "bot"
+    await update.message.reply_text(
+        f"✅ @{bot_username} отвечает.\n"
+        f"update_id={update.update_id}, chat_id={update.effective_chat.id}"
+    )
 
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -83,8 +96,11 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     bot_username = context.bot.username or "bot"
     await update.message.reply_text(
         f"Привет, {user.first_name}!\n\n"
-        f"🤖 Бот: @{bot_username}\n"
+        f"🤖 Вы в чате: @{bot_username}\n"
+        f"🔗 https://t.me/{bot_username}\n\n"
         "HH AutoApply — автоотклики hh.ru\n\n"
+        "⚠️ Пишите команды только в этот чат.\n"
+        "Если открыт другой бот — ответы сюда не придут.\n\n"
         f"Ваш Telegram ID: {user.id}\n"
         "Команды:\n"
         "/status — статус HH\n"
@@ -432,6 +448,7 @@ def build_application(for_polling: bool = False) -> Application:
 
     for handler in (
         CommandHandler("start", start_cmd),
+        CommandHandler("ping", ping_cmd),
         CommandHandler("status", status_cmd),
         CommandHandler("campaigns", campaigns_cmd),
         CommandHandler("logout", logout_cmd),

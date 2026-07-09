@@ -124,12 +124,11 @@ async def telegram_webhook(request: Request):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     payload = await request.json()
-
-    async def _run_update() -> None:
-        try:
-            await process_webhook_update(bot_app, payload)
-        except Exception:
-            logger.exception("Failed to process Telegram webhook update")
-
-    asyncio.create_task(_run_update())
+    try:
+        # Await so reply_text completes before Telegram closes the webhook request.
+        await asyncio.wait_for(process_webhook_update(bot_app, payload), timeout=55.0)
+    except asyncio.TimeoutError:
+        logger.error("Telegram webhook update timed out after 55s")
+    except Exception:
+        logger.exception("Failed to process Telegram webhook update")
     return {"ok": True}
