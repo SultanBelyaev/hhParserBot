@@ -56,8 +56,8 @@ def health_live():
 
 
 @app.get("/api/health")
-def health():
-    from app.bot.runtime import get_bot_status
+async def health():
+    from app.bot.runtime import get_bot_status, refresh_webhook_status
 
     bot_status = "not_configured"
     bot_mode = "none"
@@ -68,7 +68,7 @@ def health():
     if settings.telegram_bot_token.strip():
         if settings.should_use_telegram_webhook:
             bot_mode = "webhook"
-            info = get_bot_status()
+            info = await refresh_webhook_status()
             bot_status = info["status"]
             bot_username = info["username"]
             bot_error = info["error"]
@@ -84,12 +84,15 @@ def health():
                 bot_status = "no_heartbeat"
 
     allowed = settings.telegram_allowed_user_ids.strip()
+    token = settings.telegram_bot_token.strip()
+    bot_id = token.split(":", 1)[0] if token and ":" in token else None
     payload = {
         "status": "ok",
         "mode": "telegram-bot",
         "bot": bot_status,
         "bot_mode": bot_mode,
         "bot_username": bot_username,
+        "bot_id": bot_id,
         "webhook_url": settings.telegram_webhook_url or None,
         "telegram_allowed_user_ids_set": bool(allowed),
     }
@@ -97,9 +100,12 @@ def health():
         payload["bot_startup_error"] = bot_error[:200]
     if settings.should_use_telegram_webhook:
         payload["updates_processed"] = info.get("updates_processed", 0)
+        payload["webhook_posts_received"] = info.get("webhook_posts_received", 0)
         payload["last_update_id"] = info.get("last_update_id")
         payload["last_update_user_id"] = info.get("last_update_user_id")
         payload["last_update_text"] = info.get("last_update_text")
+        if info.get("last_handler_error"):
+            payload["last_handler_error"] = info.get("last_handler_error")
         payload["webhook_registered_url"] = info.get("webhook_registered_url")
         payload["webhook_expected_url"] = info.get("webhook_expected_url")
         payload["webhook_url_ok"] = info.get("webhook_url_ok")
@@ -109,12 +115,30 @@ def health():
     return payload
 
 
+@app.post("/api/bot/reregister-webhook")
+async def reregister_webhook_endpoint():
+    from app.bot.runtime import reregister_webhook
+
+    try:
+        info = await reregister_webhook()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "bot_username": info.get("username"),
+        "webhook_registered_url": info.get("webhook_registered_url"),
+        "webhook_pending_updates": info.get("webhook_pending_updates"),
+        "webhook_last_error": info.get("webhook_last_error"),
+    }
+
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     import asyncio
 
-    from app.bot.runtime import ensure_telegram_bot, process_webhook_update
+    from app.bot.runtime import ensure_telegram_bot, process_webhook_update, record_webhook_post
 
+    record_webhook_post()
     logger.info("Webhook POST received")
     try:
         bot_app = await asyncio.wait_for(ensure_telegram_bot(), timeout=120)

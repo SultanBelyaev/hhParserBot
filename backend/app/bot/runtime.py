@@ -26,7 +26,9 @@ class BotRuntime:
     last_update_id: int | None = None
     last_update_user_id: int | None = None
     last_update_text: str | None = None
+    last_handler_error: str | None = None
     updates_processed: int = 0
+    webhook_posts_received: int = 0
     webhook_registered_url: str | None = None
     webhook_pending_updates: int | None = None
     webhook_last_error: str | None = None
@@ -46,6 +48,8 @@ def get_bot_status() -> dict:
         "last_update_id": _runtime.last_update_id,
         "last_update_user_id": _runtime.last_update_user_id,
         "last_update_text": _runtime.last_update_text,
+        "last_handler_error": _runtime.last_handler_error,
+        "webhook_posts_received": _runtime.webhook_posts_received,
         "webhook_registered_url": _runtime.webhook_registered_url,
         "webhook_expected_url": settings.telegram_webhook_url or None,
         "webhook_url_ok": (
@@ -74,6 +78,35 @@ def get_bot_status() -> dict:
     if _runtime.task is not None and not _runtime.task.done():
         return {"status": "starting", "username": None, "error": None, **base}
     return {"status": "starting", "username": None, "error": None, **base}
+
+
+def record_webhook_post() -> None:
+    _runtime.webhook_posts_received += 1
+
+
+async def refresh_webhook_status() -> dict:
+    if _runtime.application is not None:
+        try:
+            await _sync_webhook_info(_runtime.application)
+        except Exception:
+            logger.exception("Failed to refresh Telegram webhook info")
+    return get_bot_status()
+
+
+async def reregister_webhook() -> dict:
+    app = await ensure_telegram_bot()
+    url = settings.telegram_webhook_url
+    if not url:
+        raise RuntimeError("Webhook URL не задан")
+    logger.warning("Re-registering Telegram webhook: %s", url)
+    await app.bot.delete_webhook(drop_pending_updates=False)
+    await app.bot.set_webhook(
+        url=url,
+        drop_pending_updates=False,
+        allowed_updates=Update.ALL_TYPES,
+    )
+    await _sync_webhook_info(app)
+    return get_bot_status()
 
 
 async def _sync_webhook_info(app: Application) -> None:
@@ -110,10 +143,11 @@ async def start_telegram_webhook(*, for_polling: bool = False) -> Application:
 
     if not for_polling:
         logger.info("Registering Telegram webhook: %s", url)
+        await asyncio.wait_for(app.bot.delete_webhook(drop_pending_updates=False), timeout=STEP_TIMEOUT_SEC)
         await asyncio.wait_for(
             app.bot.set_webhook(
                 url=url,
-                drop_pending_updates=True,
+                drop_pending_updates=False,
                 allowed_updates=Update.ALL_TYPES,
             ),
             timeout=STEP_TIMEOUT_SEC,
@@ -223,7 +257,13 @@ async def process_webhook_update(app: Application, payload: dict) -> None:
         _runtime.last_update_text = update.callback_query.data
 
     logger.info("Processing update %s (%s)", update.update_id, _describe_update(update))
-    await app.process_update(update)
+    try:
+        await app.process_update(update)
+        _runtime.last_handler_error = None
+    except Exception as exc:
+        _runtime.last_handler_error = str(exc)
+        logger.exception("Handler failed for update %s", update.update_id)
+        raise
     _runtime.updates_processed += 1
     touch_heartbeat()
     logger.info("Processed update %s", update.update_id)
