@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import time
+import logging
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,10 @@ from playwright.sync_api import (
 )
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+SEARCH_WAIT_MS = 90_000
 
 
 @dataclass(frozen=True)
@@ -86,16 +91,20 @@ def create_context(
     headless: bool = True,
     block_media: bool = True,
 ) -> Tuple[Browser, BrowserContext]:
-    browser = playwright.chromium.launch(headless=headless)
-    context_kwargs = {"viewport": {"width": 1920, "height": 1080}}
+    launch_kwargs: dict = {"headless": headless}
+    if headless:
+        launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
+    browser = playwright.chromium.launch(**launch_kwargs)
+    context_kwargs = login_browser_context_kwargs()
     if session_file.exists():
         context_kwargs["storage_state"] = str(session_file)
     context = browser.new_context(**context_kwargs)
     if block_media:
+        # Не блокируем font/stylesheet — иначе SPA HH может не отрисовать выдачу.
         context.route(
             "**/*",
             lambda route: route.abort()
-            if route.request.resource_type in ("image", "font", "media")
+            if route.request.resource_type in ("image", "media")
             else route.continue_(),
         )
     return browser, context
@@ -196,6 +205,25 @@ def save_login_debug_screenshot(page: Page, session_file: Path, tag: str) -> Non
         page.screenshot(path=str(path), full_page=True)
     except Exception:
         pass
+
+
+def save_debug_screenshot(page: Page, session_file: Path, tag: str) -> None:
+    try:
+        path = session_file.parent / f"{tag}.png"
+        page.screenshot(path=str(path), full_page=True)
+        logger.warning("Debug screenshot saved: %s (url=%s)", path, page.url)
+    except Exception:
+        pass
+
+
+def _page_text_snippet(page: Page, limit: int = 220) -> str:
+    try:
+        text = page.evaluate(
+            "() => (document.body?.innerText || '').replace(/\\s+/g, ' ').trim()"
+        )
+        return text[:limit] if text else "—"
+    except Exception:
+        return "—"
 
 
 def is_logged_in(page: Page) -> bool:
@@ -344,6 +372,8 @@ def collect_vacancies_for_apply(page: Page, limit: int = 10) -> List[Vacancy]:
             return []
 
     cards = page.locator('[data-qa="vacancy-serp__vacancy"]')
+    if cards.count() == 0:
+        cards = page.locator(".vacancy-serp-item")
 
     result: List[Vacancy] = []
     for i in range(cards.count()):
@@ -656,8 +686,8 @@ def search_vacancies(page: Page, query: str, area_id: str = "") -> None:
     if area_id:
         params["area"] = area_id
     url = "https://hh.ru/search/vacancy?" + urllib.parse.urlencode(params)
-    page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-    page.wait_for_timeout(400)
+    page.goto(url, wait_until="load", timeout=60_000)
+    page.wait_for_timeout(800)
     dismiss_overlays(page)
 
 
@@ -665,7 +695,16 @@ def _detect_search_page_state(page: Page) -> str:
     return page.evaluate(
         """() => {
             if (document.querySelector('[data-qa="vacancy-serp__vacancy"]')) return 'ready';
+            if (document.querySelector('a[data-qa="serp-item__title"]')) return 'ready';
             if (document.querySelector('.vacancy-serp-item')) return 'ready';
+            if (document.querySelector('[data-qa="vacancy-serp"]')) {
+                const body = (document.body?.innerText || '').replace(/\\s+/g, ' ').toLowerCase();
+                if (
+                    body.includes('ничего не найдено')
+                    || body.includes('ничего не нашлось')
+                    || body.includes('не найдены вакансии')
+                ) return 'empty';
+            }
             const body = (document.body?.innerText || '').replace(/\\s+/g, ' ').toLowerCase();
             if (
                 body.includes('ничего не найдено')
@@ -674,6 +713,7 @@ def _detect_search_page_state(page: Page) -> str:
                 || body.includes('по вашему запросу ничего')
             ) return 'empty';
             if (body.includes('капч') || body.includes('подтвердите, что вы не робот')) return 'captcha';
+            if (body.includes('доступ ограничен') || body.includes('слишком много запросов')) return 'blocked';
             if (window.location.pathname.includes('/account/login')) return 'login';
             const profile = document.querySelector('[data-qa="mainmenu_applicantProfile"]');
             const loginBtn = [...document.querySelectorAll('button,a')].some(
@@ -685,14 +725,34 @@ def _detect_search_page_state(page: Page) -> str:
     )
 
 
-def wait_for_search_results(page: Page, *, timeout_ms: int = 60_000) -> str:
-    """Ждёт выдачу. Возвращает: ready | empty | login | captcha | timeout."""
+def wait_for_search_results(page: Page, *, timeout_ms: int = SEARCH_WAIT_MS) -> str:
+    """Ждёт выдачу. Возвращает: ready | empty | login | captcha | blocked | timeout."""
     deadline = time.monotonic() + timeout_ms / 1000
+    reloaded = False
+    tick = 0
     while time.monotonic() < deadline:
         state = _detect_search_page_state(page)
         if state != "loading":
             return state
+
         dismiss_overlays(page)
+        if tick % 6 == 5:
+            try:
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            except Exception:
+                pass
+
+        elapsed = timeout_ms / 1000 - (deadline - time.monotonic())
+        if not reloaded and elapsed > timeout_ms / 2000:
+            try:
+                page.reload(wait_until="load", timeout=60_000)
+                page.wait_for_timeout(800)
+                dismiss_overlays(page)
+            except PlaywrightTimeoutError:
+                pass
+            reloaded = True
+
+        tick += 1
         page.wait_for_timeout(500)
 
     if search_has_vacancies(page):
@@ -703,7 +763,18 @@ def wait_for_search_results(page: Page, *, timeout_ms: int = 60_000) -> str:
 def search_has_vacancies(page: Page) -> bool:
     return (
         page.locator('[data-qa="vacancy-serp__vacancy"]').count() > 0
+        or page.locator('a[data-qa="serp-item__title"]').count() > 0
         or page.locator(".vacancy-serp-item").count() > 0
+    )
+
+
+def _search_failure_message(page: Page, search_query: str, session_file: Path) -> str:
+    save_debug_screenshot(page, session_file, "search_error")
+    snippet = _page_text_snippet(page)
+    return (
+        f"HH не загрузил результаты поиска «{search_query}».\n"
+        f"URL: {page.url}\n"
+        f"На странице: {snippet}"
     )
 
 
@@ -795,14 +866,15 @@ def run_campaign(
                     "HH показал проверку (капчу). Войдите локально: python login.py, "
                     "затем обновите SESSION_JSON_BASE64 в Railway."
                 )
+            if search_state == "blocked":
+                raise RuntimeError(
+                    "HH ограничил доступ (слишком много запросов). "
+                    "Подождите 15–30 минут или обновите сессию через python login.py."
+                )
             if search_state == "empty":
                 return stats
             if search_state == "timeout" and not search_has_vacancies(page):
-                raise RuntimeError(
-                    "HH не загрузил результаты поиска за минуту. "
-                    "Попробуйте позже или проверьте запрос «"
-                    f"{search_query}»."
-                )
+                raise RuntimeError(_search_failure_message(page, search_query, session_file))
 
             if not search_has_vacancies(page):
                 return stats
