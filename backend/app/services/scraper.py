@@ -337,7 +337,12 @@ def scroll_until_enough_for_apply(
 
 
 def collect_vacancies_for_apply(page: Page, limit: int = 10) -> List[Vacancy]:
-    page.wait_for_selector('[data-qa="vacancy-serp__vacancy"]', timeout=30_000)
+    if not search_has_vacancies(page):
+        try:
+            page.wait_for_selector('[data-qa="vacancy-serp__vacancy"]', timeout=10_000)
+        except PlaywrightTimeoutError:
+            return []
+
     cards = page.locator('[data-qa="vacancy-serp__vacancy"]')
 
     result: List[Vacancy] = []
@@ -651,27 +656,55 @@ def search_vacancies(page: Page, query: str, area_id: str = "") -> None:
     if area_id:
         params["area"] = area_id
     url = "https://hh.ru/search/vacancy?" + urllib.parse.urlencode(params)
-    page.goto(url, wait_until="domcontentloaded")
+    page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+    page.wait_for_timeout(400)
     dismiss_overlays(page)
 
 
-def wait_for_search_results(page: Page) -> None:
-    page.wait_for_function(
+def _detect_search_page_state(page: Page) -> str:
+    return page.evaluate(
         """() => {
-            const hasCards = document.querySelector('[data-qa="vacancy-serp__vacancy"]');
-            const body = document.body
-                ? document.body.innerText.replace(/\\s+/g, ' ').toLowerCase()
-                : '';
-            const isEmpty = body.includes('ничего не найдено')
-                || body.includes('ничего не нашлось');
-            return hasCards || isEmpty;
-        }""",
-        timeout=30_000,
+            if (document.querySelector('[data-qa="vacancy-serp__vacancy"]')) return 'ready';
+            if (document.querySelector('.vacancy-serp-item')) return 'ready';
+            const body = (document.body?.innerText || '').replace(/\\s+/g, ' ').toLowerCase();
+            if (
+                body.includes('ничего не найдено')
+                || body.includes('ничего не нашлось')
+                || body.includes('не найдены вакансии')
+                || body.includes('по вашему запросу ничего')
+            ) return 'empty';
+            if (body.includes('капч') || body.includes('подтвердите, что вы не робот')) return 'captcha';
+            if (window.location.pathname.includes('/account/login')) return 'login';
+            const profile = document.querySelector('[data-qa="mainmenu_applicantProfile"]');
+            const loginBtn = [...document.querySelectorAll('button,a')].some(
+                el => (el.textContent || '').trim() === 'Войти'
+            );
+            if (loginBtn && !profile) return 'login';
+            return 'loading';
+        }"""
     )
 
 
+def wait_for_search_results(page: Page, *, timeout_ms: int = 60_000) -> str:
+    """Ждёт выдачу. Возвращает: ready | empty | login | captcha | timeout."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        state = _detect_search_page_state(page)
+        if state != "loading":
+            return state
+        dismiss_overlays(page)
+        page.wait_for_timeout(500)
+
+    if search_has_vacancies(page):
+        return "ready"
+    return "timeout"
+
+
 def search_has_vacancies(page: Page) -> bool:
-    return page.locator('[data-qa="vacancy-serp__vacancy"]').count() > 0
+    return (
+        page.locator('[data-qa="vacancy-serp__vacancy"]').count() > 0
+        or page.locator(".vacancy-serp-item").count() > 0
+    )
 
 
 def process_vacancy(
@@ -753,7 +786,23 @@ def run_campaign(
                 raise RuntimeError("Сессия недействительна. Выполните повторный вход")
 
             search_vacancies(page, search_query, area_id)
-            wait_for_search_results(page)
+            search_state = wait_for_search_results(page)
+
+            if search_state == "login":
+                raise RuntimeError("Сессия недействительна. Выполните повторный вход (/login).")
+            if search_state == "captcha":
+                raise RuntimeError(
+                    "HH показал проверку (капчу). Войдите локально: python login.py, "
+                    "затем обновите SESSION_JSON_BASE64 в Railway."
+                )
+            if search_state == "empty":
+                return stats
+            if search_state == "timeout" and not search_has_vacancies(page):
+                raise RuntimeError(
+                    "HH не загрузил результаты поиска за минуту. "
+                    "Попробуйте позже или проверьте запрос «"
+                    f"{search_query}»."
+                )
 
             if not search_has_vacancies(page):
                 return stats
