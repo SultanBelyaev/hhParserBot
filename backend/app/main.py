@@ -100,6 +100,12 @@ def health():
         payload["last_update_id"] = info.get("last_update_id")
         payload["last_update_user_id"] = info.get("last_update_user_id")
         payload["last_update_text"] = info.get("last_update_text")
+        payload["webhook_registered_url"] = info.get("webhook_registered_url")
+        payload["webhook_expected_url"] = info.get("webhook_expected_url")
+        payload["webhook_url_ok"] = info.get("webhook_url_ok")
+        payload["webhook_pending_updates"] = info.get("webhook_pending_updates")
+        if info.get("webhook_last_error"):
+            payload["webhook_last_error"] = info.get("webhook_last_error")
     return payload
 
 
@@ -109,6 +115,7 @@ async def telegram_webhook(request: Request):
 
     from app.bot.runtime import ensure_telegram_bot, process_webhook_update
 
+    logger.info("Webhook POST received")
     try:
         bot_app = await asyncio.wait_for(ensure_telegram_bot(), timeout=120)
     except asyncio.TimeoutError as exc:

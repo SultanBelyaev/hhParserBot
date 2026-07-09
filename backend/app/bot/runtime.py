@@ -27,6 +27,9 @@ class BotRuntime:
     last_update_user_id: int | None = None
     last_update_text: str | None = None
     updates_processed: int = 0
+    webhook_registered_url: str | None = None
+    webhook_pending_updates: int | None = None
+    webhook_last_error: str | None = None
 
 
 _runtime = BotRuntime()
@@ -38,30 +41,53 @@ def touch_heartbeat() -> None:
 
 
 def get_bot_status() -> dict:
+    base = {
+        "updates_processed": _runtime.updates_processed,
+        "last_update_id": _runtime.last_update_id,
+        "last_update_user_id": _runtime.last_update_user_id,
+        "last_update_text": _runtime.last_update_text,
+        "webhook_registered_url": _runtime.webhook_registered_url,
+        "webhook_expected_url": settings.telegram_webhook_url or None,
+        "webhook_url_ok": (
+            _runtime.webhook_registered_url == settings.telegram_webhook_url
+            if _runtime.webhook_registered_url and settings.telegram_webhook_url
+            else None
+        ),
+        "webhook_pending_updates": _runtime.webhook_pending_updates,
+        "webhook_last_error": _runtime.webhook_last_error,
+    }
     if _runtime.application is not None:
         username = _runtime.application.bot_data.get("username")
         return {
             "status": "running",
             "username": f"@{username}" if username else None,
             "error": None,
-            "updates_processed": _runtime.updates_processed,
-            "last_update_id": _runtime.last_update_id,
-            "last_update_user_id": _runtime.last_update_user_id,
-            "last_update_text": _runtime.last_update_text,
+            **base,
         }
     if _runtime.error:
         return {
             "status": f"failed: {_runtime.error[:120]}",
             "username": None,
             "error": _runtime.error,
-            "updates_processed": _runtime.updates_processed,
-            "last_update_id": _runtime.last_update_id,
-            "last_update_user_id": _runtime.last_update_user_id,
-            "last_update_text": _runtime.last_update_text,
+            **base,
         }
     if _runtime.task is not None and not _runtime.task.done():
-        return {"status": "starting", "username": None, "error": None}
-    return {"status": "starting", "username": None, "error": None}
+        return {"status": "starting", "username": None, "error": None, **base}
+    return {"status": "starting", "username": None, "error": None, **base}
+
+
+async def _sync_webhook_info(app: Application) -> None:
+    info = await app.bot.get_webhook_info()
+    _runtime.webhook_registered_url = info.url or None
+    _runtime.webhook_pending_updates = info.pending_update_count
+    _runtime.webhook_last_error = info.last_error_message or None
+    if info.last_error_message:
+        logger.error("Telegram webhook last_error: %s", info.last_error_message)
+    logger.info(
+        "Webhook info: url=%s pending=%s",
+        info.url or "(empty)",
+        info.pending_update_count,
+    )
 
 
 async def start_telegram_webhook(*, for_polling: bool = False) -> Application:
@@ -87,9 +113,19 @@ async def start_telegram_webhook(*, for_polling: bool = False) -> Application:
     if not for_polling:
         logger.info("Registering Telegram webhook: %s", url)
         await asyncio.wait_for(
-            app.bot.set_webhook(url=url, drop_pending_updates=True),
+            app.bot.set_webhook(
+                url=url,
+                drop_pending_updates=False,
+                allowed_updates=Update.ALL_TYPES,
+            ),
             timeout=STEP_TIMEOUT_SEC,
         )
+        await _sync_webhook_info(app)
+        if _runtime.webhook_registered_url != url:
+            raise RuntimeError(
+                f"Webhook не зарегистрирован: ожидался {url}, "
+                f"Telegram вернул {_runtime.webhook_registered_url!r}"
+            )
 
     touch_heartbeat()
     me = await asyncio.wait_for(app.bot.get_me(), timeout=STEP_TIMEOUT_SEC)

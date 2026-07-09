@@ -80,16 +80,18 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _deny(update):
         return
     user = update.effective_user
+    bot_username = context.bot.username or "bot"
     await update.message.reply_text(
         f"Привет, {user.first_name}!\n\n"
-        "HH AutoApply — управление автооткликами через Telegram.\n\n"
+        f"🤖 Бот: @{bot_username}\n"
+        "HH AutoApply — автоотклики hh.ru\n\n"
         f"Ваш Telegram ID: {user.id}\n"
-        "Используйте меню ниже или команды:\n"
+        "Команды:\n"
         "/status — статус HH\n"
-        "/campaigns — список кампаний\n"
+        "/campaigns — кампании\n"
         "/new — новая кампания\n"
         "/login — вход в HH\n"
-        "/logout — выход из HH",
+        "/logout — выход",
         reply_markup=main_menu_keyboard(),
     )
 
