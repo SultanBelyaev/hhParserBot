@@ -23,6 +23,10 @@ class BotRuntime:
     error: str | None = None
     task: asyncio.Task | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    last_update_id: int | None = None
+    last_update_user_id: int | None = None
+    last_update_text: str | None = None
+    updates_processed: int = 0
 
 
 _runtime = BotRuntime()
@@ -40,9 +44,21 @@ def get_bot_status() -> dict:
             "status": "running",
             "username": f"@{username}" if username else None,
             "error": None,
+            "updates_processed": _runtime.updates_processed,
+            "last_update_id": _runtime.last_update_id,
+            "last_update_user_id": _runtime.last_update_user_id,
+            "last_update_text": _runtime.last_update_text,
         }
     if _runtime.error:
-        return {"status": f"failed: {_runtime.error[:120]}", "username": None, "error": _runtime.error}
+        return {
+            "status": f"failed: {_runtime.error[:120]}",
+            "username": None,
+            "error": _runtime.error,
+            "updates_processed": _runtime.updates_processed,
+            "last_update_id": _runtime.last_update_id,
+            "last_update_user_id": _runtime.last_update_user_id,
+            "last_update_text": _runtime.last_update_text,
+        }
     if _runtime.task is not None and not _runtime.task.done():
         return {"status": "starting", "username": None, "error": None}
     return {"status": "starting", "username": None, "error": None}
@@ -62,8 +78,11 @@ async def start_telegram_webhook(*, for_polling: bool = False) -> Application:
     logger.info("Initializing Telegram application...")
     await asyncio.wait_for(app.initialize(), timeout=STEP_TIMEOUT_SEC)
 
-    logger.info("Starting Telegram application...")
-    await asyncio.wait_for(app.start(), timeout=STEP_TIMEOUT_SEC)
+    if for_polling:
+        logger.info("Starting Telegram application (polling)...")
+        await asyncio.wait_for(app.start(), timeout=STEP_TIMEOUT_SEC)
+    else:
+        logger.info("Telegram application initialized (webhook uses process_update)")
 
     if not for_polling:
         logger.info("Registering Telegram webhook: %s", url)
@@ -84,7 +103,8 @@ async def stop_telegram_webhook(app: Application) -> None:
         await app.bot.delete_webhook()
     except Exception:
         logger.exception("Failed to delete Telegram webhook")
-    await app.stop()
+    if app.running:
+        await app.stop()
     await app.shutdown()
     logger.info("Telegram webhook stopped")
 
@@ -142,12 +162,34 @@ async def shutdown_bot_runtime() -> None:
         _runtime.application = None
 
 
+def _describe_update(update: Update) -> str:
+    if update.message:
+        user = update.effective_user
+        uid = user.id if user else "?"
+        text = update.message.text or update.message.caption or f"[{update.message.content_type}]"
+        return f"user={uid} text={text!r}"
+    if update.callback_query:
+        user = update.effective_user
+        uid = user.id if user else "?"
+        return f"user={uid} callback={update.callback_query.data!r}"
+    return f"type={update.update_type}"
+
+
 async def process_webhook_update(app: Application, payload: dict) -> None:
     update = Update.de_json(payload, app.bot)
-    if update is not None:
-        await app.update_queue.put(update)
-        touch_heartbeat()
-        logger.debug(
-            "Webhook update queued: update_id=%s",
-            update.update_id,
-        )
+    if update is None:
+        logger.warning("Webhook payload did not decode to Update")
+        return
+
+    _runtime.last_update_id = update.update_id
+    _runtime.last_update_user_id = update.effective_user.id if update.effective_user else None
+    if update.message and update.message.text:
+        _runtime.last_update_text = update.message.text[:120]
+    elif update.callback_query:
+        _runtime.last_update_text = update.callback_query.data
+
+    logger.info("Processing update %s (%s)", update.update_id, _describe_update(update))
+    await app.process_update(update)
+    _runtime.updates_processed += 1
+    touch_heartbeat()
+    logger.info("Processed update %s", update.update_id)

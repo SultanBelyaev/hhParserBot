@@ -229,7 +229,7 @@ class LoginManager:
                 cmd.done.put(exc)
 
 
-_manager: LoginManager | None = None
+_manager: Optional[LoginManager] = None
 _manager_lock = threading.Lock()
 
 

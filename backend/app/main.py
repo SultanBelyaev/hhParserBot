@@ -27,6 +27,11 @@ async def lifespan(app: FastAPI):
         await shutdown_bot_runtime()
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 app = FastAPI(
     title="HH Parser AutoApply",
     description="Автоотклики hh.ru — управление через Telegram-бота",
@@ -58,6 +63,7 @@ def health():
     bot_mode = "none"
     bot_username = None
     bot_error = None
+    info: dict = {}
 
     if settings.telegram_bot_token.strip():
         if settings.should_use_telegram_webhook:
@@ -89,6 +95,11 @@ def health():
     }
     if bot_error:
         payload["bot_startup_error"] = bot_error[:200]
+    if settings.should_use_telegram_webhook:
+        payload["updates_processed"] = info.get("updates_processed", 0)
+        payload["last_update_id"] = info.get("last_update_id")
+        payload["last_update_user_id"] = info.get("last_update_user_id")
+        payload["last_update_text"] = info.get("last_update_text")
     return payload
 
 

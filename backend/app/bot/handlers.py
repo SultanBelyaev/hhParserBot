@@ -66,7 +66,17 @@ async def _deny(update: Update) -> bool:
     return True
 
 
+PRIORITY_GROUP = -1
+DEFAULT_GROUP = 0
+
+
+async def reset_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.clear()
+    await asyncio.to_thread(bot_services.cancel_login)
+
+
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await reset_state(update, context)
     if await _deny(update):
         return
     user = update.effective_user
@@ -299,7 +309,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.message.reply_text(f"Ошибка: {exc}")
 
 
-async def menu_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_conv_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await start_cmd(update, context)
+    return ConversationHandler.END
+
+
+async def menu_simple_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await reset_state(update, context)
     if await _deny(update):
         return
     text = update.message.text.strip()
@@ -307,12 +323,11 @@ async def menu_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await status_cmd(update, context)
     elif text == "📋 Кампании":
         await campaigns_cmd(update, context)
-    elif text == "🔐 Войти":
-        return
-    elif text == "➕ Новая кампания":
-        return
     elif text == "🚪 Выйти из HH":
         await logout_cmd(update, context)
+
+
+MENU_SIMPLE = filters.Regex(r"^(📊 Статус HH|📋 Кампании|🚪 Выйти из HH)$")
 
 
 def build_application(for_polling: bool = False) -> Application:
@@ -333,7 +348,11 @@ def build_application(for_polling: bool = False) -> Application:
             LOGIN_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, login_phone)],
             LOGIN_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, login_code)],
         },
-        fallbacks=[CommandHandler("cancel", login_cancel)],
+        fallbacks=[
+            CommandHandler("start", start_conv_fallback),
+            CommandHandler("cancel", login_cancel),
+            MessageHandler(MENU_SIMPLE, menu_simple_handler),
+        ],
     )
 
     new_conv = ConversationHandler(
@@ -348,7 +367,11 @@ def build_application(for_polling: bool = False) -> Application:
             NEW_AREA: [CallbackQueryHandler(new_area_cb, pattern=r"^area:")],
             NEW_CONFIRM: [CallbackQueryHandler(new_confirm_cb, pattern=r"^confirm:")],
         },
-        fallbacks=[CommandHandler("cancel", new_cancel)],
+        fallbacks=[
+            CommandHandler("start", start_conv_fallback),
+            CommandHandler("cancel", new_cancel),
+            MessageHandler(MENU_SIMPLE, menu_simple_handler),
+        ],
         allow_reentry=True,
     )
 
@@ -384,14 +407,23 @@ def build_application(for_polling: bool = False) -> Application:
         builder = builder.post_init(_on_bot_start)
     app = builder.build()
     app.add_error_handler(_on_error)
-    app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("status", status_cmd))
-    app.add_handler(CommandHandler("campaigns", campaigns_cmd))
-    app.add_handler(CommandHandler("logout", logout_cmd))
-    app.add_handler(login_conv)
-    app.add_handler(new_conv)
-    app.add_handler(CallbackQueryHandler(callback_handler, pattern=r"^(start|stop|delete|stats|logs):"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_text_handler))
+
+    for handler in (
+        CommandHandler("start", start_cmd),
+        CommandHandler("status", status_cmd),
+        CommandHandler("campaigns", campaigns_cmd),
+        CommandHandler("logout", logout_cmd),
+        CommandHandler("cancel", login_cancel),
+        MessageHandler(MENU_SIMPLE, menu_simple_handler),
+    ):
+        app.add_handler(handler, group=PRIORITY_GROUP)
+
+    app.add_handler(login_conv, group=DEFAULT_GROUP)
+    app.add_handler(new_conv, group=DEFAULT_GROUP)
+    app.add_handler(
+        CallbackQueryHandler(callback_handler, pattern=r"^(start|stop|delete|stats|logs):"),
+        group=DEFAULT_GROUP,
+    )
     return app
 
 
