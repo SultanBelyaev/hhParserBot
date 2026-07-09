@@ -13,6 +13,9 @@ def main() -> int:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip().strip('"').strip("'")
     if not token:
         warnings.append("TELEGRAM_BOT_TOKEN not set — bot disabled")
+    elif ":" in token:
+        bot_id = token.split(":", 1)[0]
+        print(f"TELEGRAM bot_id={bot_id} (у каждого Railway-проекта должен быть свой bot_id)", file=sys.stderr)
 
     data_dir = os.getenv("DATA_DIR", "/data").strip().strip('"').strip("'")
     session_file = os.getenv("SESSION_FILE", f"{data_dir}/session.json").strip().strip('"').strip("'")

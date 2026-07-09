@@ -43,6 +43,7 @@ def get_bot_status() -> dict:
         return {
             "status": "running",
             "username": f"@{username}" if username else None,
+            "bot_id": _runtime.application.bot_data.get("bot_id"),
             "error": None,
             "updates_processed": _runtime.updates_processed,
             "last_update_id": _runtime.last_update_id,
@@ -94,7 +95,26 @@ async def start_telegram_webhook(*, for_polling: bool = False) -> Application:
     touch_heartbeat()
     me = await asyncio.wait_for(app.bot.get_me(), timeout=STEP_TIMEOUT_SEC)
     app.bot_data["username"] = me.username
-    logger.info("Telegram bot ready (@%s)", me.username)
+    app.bot_data["bot_id"] = me.id
+
+    expected = settings.telegram_expected_username.strip().lstrip("@")
+    if expected and me.username != expected:
+        raise RuntimeError(
+            f"Неверный TELEGRAM_BOT_TOKEN: ожидался @{expected}, "
+            f"получен @{me.username}. У каждого Railway-проекта должен быть СВОЙ бот от @BotFather."
+        )
+
+    if not for_polling:
+        info = await app.bot.get_webhook_info()
+        if info.url and info.url != url:
+            logger.warning("Webhook был %s, перерегистрируем на %s", info.url, url)
+
+    logger.info(
+        "Telegram bot ready: @%s (id=%s) webhook=%s",
+        me.username,
+        me.id,
+        url if not for_polling else "polling",
+    )
     return app
 
 
