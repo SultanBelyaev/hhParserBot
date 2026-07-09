@@ -1,5 +1,6 @@
 from typing import Optional
 
+from app.bot.constants import CAMPAIGN_PRESETS
 from app.config import settings
 from app.database import SessionLocal
 from app.models import ApplicationLog, Campaign
@@ -7,6 +8,54 @@ from app.services.auth_service import LoginState, get_login_manager
 from app.services.scraper import check_session_valid
 from app.services.stats_service import DETAIL_LABELS, build_campaign_stats
 from app.services.worker import campaign_worker
+
+
+def get_hh_status_quick() -> dict:
+    """Быстрая проверка без Playwright (файл сессии)."""
+    exists = settings.session_file.exists()
+    return {
+        "connected": exists,
+        "message": None if exists else "Войдите в аккаунт HH.",
+    }
+
+
+def get_dashboard_data() -> dict:
+    quick = get_hh_status_quick()
+    campaigns = list_campaigns()
+    running = [c for c in campaigns if c.status == "running"]
+    return {
+        "hh_connected": quick["connected"],
+        "hh_message": quick["message"],
+        "campaigns": campaigns,
+        "running_count": len(running),
+        "has_campaigns": bool(campaigns),
+    }
+
+
+def duplicate_campaign(campaign_id: int) -> Campaign:
+    source = get_campaign(campaign_id)
+    if not source:
+        raise ValueError("Кампания не найдена")
+    return create_campaign(
+        name=f"{source.name} (копия)",
+        search_query=source.search_query,
+        apply_limit=source.apply_limit,
+        area_id=source.area_id,
+        cover_letter=source.cover_letter,
+    )
+
+
+def apply_preset(preset_index: int) -> dict:
+    if preset_index < 0 or preset_index >= len(CAMPAIGN_PRESETS):
+        raise ValueError("Неизвестный пресет")
+    preset = CAMPAIGN_PRESETS[preset_index]
+    return {
+        "name": preset["name"],
+        "search_query": preset["search_query"],
+        "area_id": preset["area_id"] or None,
+        "apply_limit": preset["apply_limit"],
+        "cover_letter": settings.default_cover_letter,
+    }
 
 
 def get_auth_status() -> dict:
