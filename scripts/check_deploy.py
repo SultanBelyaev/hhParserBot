@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 
 def main() -> int:
@@ -22,6 +23,12 @@ def main() -> int:
     db_url = os.getenv("DATABASE_URL", "").strip().strip('"').strip("'")
     if db_url and not db_url.startswith("sqlite:////"):
         warnings.append(f"DATABASE_URL should use sqlite:////data/... on Railway, got: {db_url[:40]}")
+
+    data_path = Path(data_dir)
+    if os.getenv("RAILWAY_PUBLIC_DOMAIN") and not data_path.is_dir():
+        warnings.append(
+            f"DATA_DIR {data_dir} missing at startup — attach Railway Volume with mount path /data"
+        )
 
     if os.getenv("RAILWAY_PUBLIC_DOMAIN") and not token:
         errors.append("RAILWAY_PUBLIC_DOMAIN set but TELEGRAM_BOT_TOKEN missing")

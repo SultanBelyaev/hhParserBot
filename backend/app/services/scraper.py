@@ -69,8 +69,10 @@ def setup_playwright_browsers_path() -> None:
 
 def ensure_chromium_installed() -> None:
     browsers_root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""))
-    if browsers_root.exists() and list(browsers_root.glob("chromium-*")):
-        return
+    if browsers_root.exists():
+        patterns = ("chromium-*", "chromium_headless_shell-*")
+        if any(browsers_root.glob(p) for p in patterns):
+            return
     raise RuntimeError(
         "Chromium не найден. Выполните: python3 -m playwright install chromium"
     )

@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 
@@ -112,6 +113,26 @@ async def health():
         payload["webhook_pending_updates"] = info.get("webhook_pending_updates")
         if info.get("webhook_last_error"):
             payload["webhook_last_error"] = info.get("webhook_last_error")
+
+    db_path = settings.database_url.replace("sqlite:///", "", 1) if settings.database_url.startswith("sqlite:///") else settings.database_url
+    db_file = Path(db_path) if db_path else None
+    campaigns_count = None
+    if db_file and db_file.exists():
+        try:
+            from app.bot.services import list_campaigns
+
+            campaigns_count = len(list_campaigns())
+        except Exception:
+            campaigns_count = None
+    payload["database"] = {
+        "url": settings.database_url,
+        "path": str(db_file) if db_file else None,
+        "on_volume": str(db_file).startswith("/data/") if db_file else False,
+        "exists": db_file.exists() if db_file else False,
+        "size_bytes": db_file.stat().st_size if db_file and db_file.exists() else 0,
+        "campaigns_count": campaigns_count,
+        "session_exists": settings.session_file.exists(),
+    }
     return payload
 
 

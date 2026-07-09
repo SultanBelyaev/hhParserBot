@@ -36,23 +36,58 @@ def area_label(area_id: str | None) -> str:
 
 
 def friendly_error(exc: Exception) -> str:
-    text = str(exc).lower()
-    if "не найден" in text or "not found" in text:
+    raw = str(exc)
+    text = raw.lower()
+
+    if "chromium" in text:
+        return (
+            "Не удалось запустить браузер.\n"
+            f"{raw}\n\n"
+            "На Railway нужен Docker-образ с Playwright. Локально: python3 -m playwright install chromium"
+        )
+    if "кампани" in text and ("не найден" in text or "not found" in text):
         return "Кампания не найдена. Обновите список: /campaigns"
-    if "уже запущена" in text or "already" in text:
+    if "сессия" in text or "session" in text:
+        return "Сначала войдите в HH: нажмите 🔐 Войти или /login"
+    if "уже запущена" in text or ("already" in text and "campaign" in text):
         return "Кампания уже запущена. Сначала остановите её."
-    if "остановите" in text:
+    if "остановите" in text and "кампани" in text:
         return "Сначала остановите кампанию, затем повторите действие."
     if "timeout" in text or "таймаут" in text:
         return (
             "HH или Telegram не ответили вовремя.\n"
             "Попробуйте ещё раз через пару минут."
         )
-    if "session" in text or "сессия" in text or "войдите" in text:
-        return "Сначала войдите в HH: нажмите 🔐 Войти или /login"
+    if "войдите" in text or "вход" in text and "процесс" in text:
+        return raw
     if "доступ" in text:
-        return str(exc)
-    return f"Что-то пошло не так.\n{exc}"
+        return raw
+    if "не найден" in text or "not found" in text:
+        return raw
+    return f"Что-то пошло не так.\n{raw}"
+
+
+def login_error(exc: Exception) -> str:
+    raw = str(exc)
+    text = raw.lower()
+    if "chromium" in text:
+        return friendly_error(exc)
+    if "timeout" in text or "таймаут" in text:
+        return (
+            "HH не ответил вовремя при открытии страницы входа.\n"
+            "Попробуйте /login ещё раз через минуту."
+        )
+    if "не найден" in text:
+        return (
+            f"{raw}\n\n"
+            "HH мог изменить страницу входа или показать капчу. "
+            "Попробуйте позже или выполните вход локально: python login.py"
+        )
+    if "headless" in text or "диспле" in text:
+        return raw
+    if "уже в процессе" in text or "не ожидается" in text:
+        return raw
+    return friendly_error(exc)
 
 
 def format_dashboard(

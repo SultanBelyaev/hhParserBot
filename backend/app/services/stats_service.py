@@ -132,4 +132,5 @@ def build_campaign_stats(campaign: Campaign, db: Session) -> dict:
         "by_status": by_status,
         "by_detail": detail_breakdown,
         "timeline": timeline[-50:],
+        "error_message": campaign.error_message,
     }

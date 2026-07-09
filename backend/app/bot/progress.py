@@ -14,6 +14,7 @@ from app.bot.messages import format_campaign_finished, format_progress_update
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SEC = 90
+STATUS_CHECK_SEC = 5
 _tasks: dict[int, asyncio.Task] = {}
 
 
@@ -55,7 +56,7 @@ async def _poll_campaign(
                     message_id = sent.message_id
                 last_processed = campaign.processed_count
 
-            await asyncio.sleep(POLL_INTERVAL_SEC)
+            await asyncio.sleep(STATUS_CHECK_SEC)
     except asyncio.CancelledError:
         raise
     except Exception:

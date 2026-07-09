@@ -47,7 +47,7 @@ def get_hh_status_quick() -> dict:
 def get_dashboard_data() -> dict:
     quick = get_hh_status_quick()
     campaigns = list_campaigns()
-    running = [c for c in campaigns if bot_services.effective_status(c) in ("running", "stopping")]
+    running = [c for c in campaigns if effective_status(c) in ("running", "stopping")]
     return {
         "hh_connected": quick["connected"],
         "hh_message": quick["message"],
@@ -174,6 +174,12 @@ def create_campaign(
 
 
 def start_campaign(campaign_id: int) -> Campaign:
+    if not settings.session_file.exists():
+        raise ValueError(
+            "Сессия HH не найдена. Выполните /login в боте "
+            "или задайте SESSION_JSON_BASE64 в Railway Variables."
+        )
+
     db = SessionLocal()
     try:
         campaign = db.get(Campaign, campaign_id)
@@ -274,13 +280,16 @@ def campaign_logs(campaign_id: int, limit: int = 15) -> list[ApplicationLog]:
 
 def format_campaign_short(c: Campaign) -> str:
     status = effective_status(c)
-    return (
-        f"#{c.id} {c.name}\n"
-        f"Статус: {status_label(status)}\n"
-        f"Запрос: «{c.search_query}»\n"
+    lines = [
+        f"#{c.id} {c.name}",
+        f"Статус: {status_label(status)}",
+        f"Запрос: «{c.search_query}»",
         f"Прогресс: {c.processed_count}/{c.apply_limit} "
-        f"(✅{c.sent_count} ⏭{c.skipped_count} ❌{c.failed_count})"
-    )
+        f"(✅{c.sent_count} ⏭{c.skipped_count} ❌{c.failed_count})",
+    ]
+    if c.error_message and status == "failed":
+        lines.append(f"\n⚠️ Причина: {c.error_message[:300]}")
+    return "\n".join(lines)
 
 
 def format_stats(stats: dict) -> str:
@@ -300,11 +309,19 @@ def format_stats(stats: dict) -> str:
         lines.append("\nПричины:")
         for item in stats["by_detail"][:6]:
             lines.append(f"• {item['label']}: {item['count']}")
+    err = stats.get("error_message")
+    if err and stats["campaign_status"] == "failed":
+        lines.append(f"\n⚠️ Ошибка запуска: {err[:300]}")
     return "\n".join(lines)
 
 
-def format_logs(logs: list[ApplicationLog]) -> str:
+def format_logs(logs: list[ApplicationLog], *, campaign: Campaign | None = None) -> str:
     if not logs:
+        if campaign and campaign.error_message and effective_status(campaign) == "failed":
+            return (
+                "Лог пуст — ни одна вакансия не обработана.\n\n"
+                f"⚠️ Причина: {campaign.error_message[:300]}"
+            )
         return "Лог пуст."
     lines = ["📝 Последние отклики:"]
     for log in logs:

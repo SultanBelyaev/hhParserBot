@@ -37,6 +37,7 @@ from app.bot.messages import (
     format_onboarding,
     friendly_error,
     help_text,
+    login_error,
     step_header,
 )
 from app.bot.progress import start_progress_updates, stop_progress_updates
@@ -170,7 +171,7 @@ async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.exception("Telegram handler error: %s", context.error)
     if not isinstance(update, Update):
         return
-    msg = friendly_error(context.error) if context.error else "Неизвестная ошибка"
+    msg = login_error(context.error) if context.error else "Неизвестная ошибка"
     if update.message:
         await update.message.reply_text(msg, reply_markup=retry_keyboard("login"))
     elif update.callback_query:
@@ -213,7 +214,7 @@ async def campaigns_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def _login_error_hint(exc: Exception) -> str:
-    return friendly_error(exc) + "\n\n/login — попробовать снова."
+    return login_error(exc) + "\n\n/login — попробовать снова."
 
 
 async def login_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -537,8 +538,9 @@ async def campaign_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await query.message.reply_text(bot_services.format_stats(stats))
             return
         elif action == "logs":
+            campaign = await asyncio.to_thread(bot_services.get_campaign, campaign_id)
             logs = await asyncio.to_thread(bot_services.campaign_logs, campaign_id)
-            await query.message.reply_text(bot_services.format_logs(logs))
+            await query.message.reply_text(bot_services.format_logs(logs, campaign=campaign))
             return
         else:
             return

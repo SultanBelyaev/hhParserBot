@@ -1,4 +1,5 @@
 import threading
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
@@ -9,6 +10,8 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import ApplicationLog, Campaign
 from app.services.scraper import run_campaign
+
+logger = logging.getLogger(__name__)
 
 
 class CampaignWorker:
@@ -131,6 +134,7 @@ class CampaignWorker:
                 campaign.finished_at = datetime.now(timezone.utc)
                 db.commit()
         except Exception as exc:
+            logger.exception("Campaign %s failed: %s", campaign_id, exc)
             campaign = db.get(Campaign, campaign_id)
             if campaign:
                 campaign.status = "failed"
