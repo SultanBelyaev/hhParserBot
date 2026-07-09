@@ -108,7 +108,23 @@ async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _deny(update):
         return
-    auth = await asyncio.to_thread(bot_services.get_auth_status)
+    if not settings.session_file.exists():
+        await update.message.reply_text(
+            "❌ HH не подключён\nВойдите в аккаунт HH.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+    await update.message.reply_text("⏳ Проверяю сессию HH...")
+    try:
+        auth = await asyncio.wait_for(
+            asyncio.to_thread(bot_services.get_auth_status),
+            timeout=45,
+        )
+    except asyncio.TimeoutError:
+        auth = {
+            "connected": False,
+            "message": "Проверка заняла слишком долго. Попробуйте /login.",
+        }
     text = "✅ HH подключён" if auth["connected"] else f"❌ HH не подключён\n{auth['message'] or ''}"
     await update.message.reply_text(text, reply_markup=main_menu_keyboard())
 
@@ -353,6 +369,8 @@ def build_application(for_polling: bool = False) -> Application:
         fallbacks=[
             CommandHandler("start", start_conv_fallback),
             CommandHandler("cancel", login_cancel),
+            MessageHandler(filters.Regex("^🔐 Войти$"), login_start),
+            MessageHandler(filters.Regex("^➕ Новая кампания$"), new_start),
             MessageHandler(MENU_SIMPLE, menu_simple_handler),
         ],
     )
@@ -372,6 +390,8 @@ def build_application(for_polling: bool = False) -> Application:
         fallbacks=[
             CommandHandler("start", start_conv_fallback),
             CommandHandler("cancel", new_cancel),
+            MessageHandler(filters.Regex("^🔐 Войти$"), login_start),
+            MessageHandler(filters.Regex("^➕ Новая кампания$"), new_start),
             MessageHandler(MENU_SIMPLE, menu_simple_handler),
         ],
         allow_reentry=True,

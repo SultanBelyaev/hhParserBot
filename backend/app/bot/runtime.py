@@ -99,23 +99,21 @@ async def start_telegram_webhook(*, for_polling: bool = False) -> Application:
         )
 
     logger.info("Building Telegram application...")
-    app = await asyncio.to_thread(lambda: build_application(for_polling=for_polling))
+    # Must run on the main asyncio loop — ConversationHandler creates asyncio.Lock().
+    app = build_application(for_polling=for_polling)
 
     logger.info("Initializing Telegram application...")
     await asyncio.wait_for(app.initialize(), timeout=STEP_TIMEOUT_SEC)
 
-    if for_polling:
-        logger.info("Starting Telegram application (polling)...")
-        await asyncio.wait_for(app.start(), timeout=STEP_TIMEOUT_SEC)
-    else:
-        logger.info("Telegram application initialized (webhook uses process_update)")
+    logger.info("Starting Telegram application...")
+    await asyncio.wait_for(app.start(), timeout=STEP_TIMEOUT_SEC)
 
     if not for_polling:
         logger.info("Registering Telegram webhook: %s", url)
         await asyncio.wait_for(
             app.bot.set_webhook(
                 url=url,
-                drop_pending_updates=False,
+                drop_pending_updates=True,
                 allowed_updates=Update.ALL_TYPES,
             ),
             timeout=STEP_TIMEOUT_SEC,

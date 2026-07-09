@@ -26,7 +26,6 @@ if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -z "${RAILWAY_PUBLIC_DOMAIN:-}" ] && [ 
   echo "[bot] local polling mode — run: python run_bot.py (separate terminal)"
 else
   echo "Telegram bot: webhook mode (inside uvicorn, domain=${RAILWAY_PUBLIC_DOMAIN:-PUBLIC_URL})"
-echo "Redeploy: pick up TELEGRAM_BOT_TOKEN from Railway Variables ($(date -u +%Y-%m-%dT%H:%MZ))"
 fi
 
 echo "Starting API on port ${PORT}..."
