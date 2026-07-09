@@ -97,7 +97,6 @@ def health():
         payload["bot_startup_error"] = bot_error[:200]
     if settings.should_use_telegram_webhook:
         payload["updates_processed"] = info.get("updates_processed", 0)
-        payload["bot_id"] = info.get("bot_id")
         payload["last_update_id"] = info.get("last_update_id")
         payload["last_update_user_id"] = info.get("last_update_user_id")
         payload["last_update_text"] = info.get("last_update_text")

@@ -61,7 +61,6 @@ class Settings(BaseSettings):
     railway_public_domain: str = Field(default="", validation_alias="RAILWAY_PUBLIC_DOMAIN")
     public_url: str = Field(default="", validation_alias="PUBLIC_URL")
     telegram_use_webhook: bool = Field(default=False, validation_alias="TELEGRAM_USE_WEBHOOK")
-    telegram_expected_username: str = Field(default="", validation_alias="TELEGRAM_EXPECTED_USERNAME")
 
     @model_validator(mode="before")
     @classmethod

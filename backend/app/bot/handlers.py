@@ -80,13 +80,11 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _deny(update):
         return
     user = update.effective_user
-    bot_username = context.bot.username or "personalhhparserbot"
     await update.message.reply_text(
         f"Привет, {user.first_name}!\n\n"
-        f"🤖 Это бот @{bot_username} — HH AutoApply (автоотклики hh.ru).\n"
-        "Если вы искали другого бота — вы в нужном месте только если открыли именно его.\n\n"
+        "HH AutoApply — управление автооткликами через Telegram.\n\n"
         f"Ваш Telegram ID: {user.id}\n"
-        "Команды:\n"
+        "Используйте меню ниже или команды:\n"
         "/status — статус HH\n"
         "/campaigns — список кампаний\n"
         "/new — новая кампания\n"
